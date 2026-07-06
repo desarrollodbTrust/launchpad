@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #e4edf5;
+  --foreground: #0f172a;
+  --surface: #f0f6fb;
+  --tile: #f8fbff;
+  --tile-border: #cad8e6;
+  --tile-muted: #5c6b7b;
+  --tile-hover: #ffffff;
 }
 
 @theme inline {
@@ -12,15 +17,15 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), "Segoe UI", sans-serif;
+}
+
+.launchpad-bg {
+  background:
+    radial-gradient(circle at 12% 10%, rgba(56, 189, 248, 0.19), transparent 32%),
+    radial-gradient(circle at 88% 14%, rgba(16, 185, 129, 0.17), transparent 29%),
+    linear-gradient(180deg, #edf4fb 0%, #d8e3ef 100%);
 }
