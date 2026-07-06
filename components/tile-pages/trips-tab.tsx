@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Brush,
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ReferenceDot,
@@ -83,6 +85,8 @@ type ObdPoint = {
   speedSource: string;
   speedObdRaw: number;
   speedGps: number;
+  hasSpeedCan: boolean;
+  hasSpeedGps: boolean;
   rpm: number;
   waterTemp: number;
   battery: number;
@@ -198,8 +202,10 @@ function normalizeObdPoint(record: ObdPointApi): ObdPoint | null {
   }
 
   const speedSource = toText(record.speedFrom, "").toUpperCase();
-  const speedObdRaw = toNumber(record.speedObdRaw) ?? 0;
-  const speedGps = toNumber(record.speedGps) ?? 0;
+  const speedObdRawParsed = toNumber(record.speedObdRaw);
+  const speedGpsParsed = toNumber(record.speedGps);
+  const speedObdRaw = speedObdRawParsed ?? 0;
+  const speedGps = speedGpsParsed ?? 0;
   const speed = speedSource === "CAN" ? speedObdRaw : speedGps;
   const inTravelValue =
     typeof record.inTravel === "boolean"
@@ -214,6 +220,8 @@ function normalizeObdPoint(record: ObdPointApi): ObdPoint | null {
     speedSource: speedSource || "GPS",
     speedObdRaw,
     speedGps,
+    hasSpeedCan: speedObdRawParsed !== undefined,
+    hasSpeedGps: speedGpsParsed !== undefined,
     rpm: toNumber(record.rpm) ?? 0,
     waterTemp: toNumber(record.waterTemp) ?? 0,
     battery: toNumber(record.battery) ?? 0,
@@ -243,6 +251,13 @@ function metricLabel(metric: ChartMetric) {
     default:
       return metric;
   }
+}
+
+function seriesLabel(series: string) {
+  if (series === "speed") return "Speed";
+  if (series === "speedGps") return "Speed GPS";
+  if (series === "speedObdRaw") return "Speed CAN";
+  return metricLabel(series as ChartMetric);
 }
 
 function formatTimestamp(value: string) {
@@ -302,13 +317,17 @@ function InteractiveChart({
   points,
   metric,
   selectedIndex,
+  showSpeedOverlay,
   onSelect,
 }: {
   points: ObdPoint[];
   metric: ChartMetric;
   selectedIndex: number | null;
+  showSpeedOverlay: boolean;
   onSelect: (index: number) => void;
 }) {
+  const [brushKey, setBrushKey] = useState(0);
+
   if (points.length === 0) {
     return (
       <div className="h-64 rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
@@ -321,6 +340,10 @@ function InteractiveChart({
     index,
     timestamp: point.timestamp,
     speed: point.speed,
+    speedGps: point.speedGps,
+    speedObdRaw: point.speedObdRaw,
+    hasSpeedCan: point.hasSpeedCan,
+    hasSpeedGps: point.hasSpeedGps,
     rpm: point.rpm,
     waterTemp: point.waterTemp,
     battery: point.battery,
@@ -334,10 +357,22 @@ function InteractiveChart({
       : null;
 
   const tickStep = Math.max(1, Math.floor(chartData.length / 8));
+  const renderSpeedOverlay = metric === "speed" && showSpeedOverlay;
+  const hasGpsSeries = chartData.some((item) => item.hasSpeedGps);
+  const hasCanSeries = chartData.some((item) => item.hasSpeedCan);
 
   return (
     <div className="rounded border border-slate-200 bg-white p-3">
-      <p className="mb-2 text-sm font-medium text-slate-700">{metricLabel(metric)} (click para seleccionar punto)</p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-sm font-medium text-slate-700">{metricLabel(metric)} (click para seleccionar punto)</p>
+        <button
+          type="button"
+          onClick={() => setBrushKey((current) => current + 1)}
+          className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+        >
+          Reset Zoom
+        </button>
+      </div>
       <div className="h-72 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
@@ -359,36 +394,83 @@ function InteractiveChart({
             />
             <YAxis tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
             <Tooltip
-              formatter={(value: number, name: string) => [Number(value).toFixed(2), metricLabel(name as ChartMetric)]}
+              formatter={(value: number, name: string) => [Number(value).toFixed(2), seriesLabel(name)]}
               labelFormatter={(label: number) => formatTimestamp(chartData[label]?.timestamp ?? "")}
             />
-            <Line
-              type="monotone"
-              dataKey={metric}
-              stroke="#2563eb"
-              strokeWidth={2}
-              dot={(props) => {
-                const pointIndex = props.index;
-                const isSelected = pointIndex === selectedIndex;
-                return (
-                  <circle
-                    cx={props.cx}
-                    cy={props.cy}
-                    r={isSelected ? 6 : 3}
-                    fill={isSelected ? "#dc2626" : "#2563eb"}
-                    stroke="#ffffff"
-                    strokeWidth={isSelected ? 2 : 1}
-                    style={{ cursor: "pointer" }}
-                    onClick={() => {
-                      if (typeof pointIndex === "number") {
-                        onSelect(pointIndex);
-                      }
-                    }}
+            {renderSpeedOverlay ? (
+              <>
+                <Legend />
+                {hasGpsSeries && (
+                  <Line
+                    type="monotone"
+                    dataKey="speedGps"
+                    name="Speed GPS"
+                    stroke="#16a34a"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 7 }}
                   />
-                );
-              }}
-              activeDot={{ r: 7 }}
-            />
+                )}
+                {hasCanSeries && (
+                  <Line
+                    type="monotone"
+                    dataKey="speedObdRaw"
+                    name="Speed CAN"
+                    stroke="#f59e0b"
+                    strokeWidth={2}
+                    dot={(props) => {
+                      const pointIndex = props.index;
+                      const isSelected = pointIndex === selectedIndex;
+                      return (
+                        <circle
+                          cx={props.cx}
+                          cy={props.cy}
+                          r={isSelected ? 6 : 3}
+                          fill={isSelected ? "#dc2626" : "#f59e0b"}
+                          stroke="#ffffff"
+                          strokeWidth={isSelected ? 2 : 1}
+                          style={{ cursor: "pointer" }}
+                          onClick={() => {
+                            if (typeof pointIndex === "number") {
+                              onSelect(pointIndex);
+                            }
+                          }}
+                        />
+                      );
+                    }}
+                    activeDot={{ r: 7 }}
+                  />
+                )}
+              </>
+            ) : (
+              <Line
+                type="monotone"
+                dataKey={metric}
+                stroke="#2563eb"
+                strokeWidth={2}
+                dot={(props) => {
+                  const pointIndex = props.index;
+                  const isSelected = pointIndex === selectedIndex;
+                  return (
+                    <circle
+                      cx={props.cx}
+                      cy={props.cy}
+                      r={isSelected ? 6 : 3}
+                      fill={isSelected ? "#dc2626" : "#2563eb"}
+                      stroke="#ffffff"
+                      strokeWidth={isSelected ? 2 : 1}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => {
+                        if (typeof pointIndex === "number") {
+                          onSelect(pointIndex);
+                        }
+                      }}
+                    />
+                  );
+                }}
+                activeDot={{ r: 7 }}
+              />
+            )}
             {selected && (
               <ReferenceDot
                 x={selected.index}
@@ -400,6 +482,12 @@ function InteractiveChart({
                 ifOverflow="extendDomain"
               />
             )}
+            <Brush
+              key={brushKey}
+              dataKey="index"
+              height={20}
+              stroke="#94a3b8"
+            />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -421,6 +509,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
   const [obdLoading, setObdLoading] = useState(false);
   const [lastVin, setLastVin] = useState(vin);
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
+  const [showSpeedOverlay, setShowSpeedOverlay] = useState(false);
   const mapRef = useRef<google.maps.Map | null>(null);
 
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
@@ -436,6 +525,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
     setMode("list");
     setObdPoints([]);
     setSelectedPointIndex(null);
+    setShowSpeedOverlay(false);
   }
 
   useEffect(() => {
@@ -789,11 +879,22 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
                       <option value="oilPressure">Oil Pressure</option>
                       <option value="inletPressure">Inlet Pressure</option>
                     </select>
+                    {metric === "speed" && (
+                      <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={showSpeedOverlay}
+                          onChange={(event) => setShowSpeedOverlay(event.target.checked)}
+                        />
+                        Comparar velocidades (GPS / CAN)
+                      </label>
+                    )}
                   </div>
                   <InteractiveChart
                     points={visualPoints}
                     metric={metric}
                     selectedIndex={selectedPointIndex}
+                    showSpeedOverlay={showSpeedOverlay}
                     onSelect={(index) => setSelectedPointIndex(index)}
                   />
                 </div>

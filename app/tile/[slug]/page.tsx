@@ -16,7 +16,7 @@ export default async function TilePage({ params }: TilePageProps) {
   }
 
   return (
-    <main className="min-h-screen bg-[color:var(--background)] px-6 py-10">
+    <main className="h-screen overflow-hidden bg-[color:var(--background)] px-4 py-4 md:px-6">
       <TileComponent title={tile.title} subtitle={tile.subtitle} />
     </main>
   );

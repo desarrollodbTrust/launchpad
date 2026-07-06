@@ -146,6 +146,8 @@ type NormalizedVehicle = {
   deviceId: string;
   color: string;
   vehicleType: string;
+  smallImageUrl?: string;
+  bigImageUrl?: string;
   imageUrl?: string;
 };
 
@@ -211,6 +213,8 @@ function normalizeVehicle(record: Record<string, unknown>): NormalizedVehicle | 
     deviceId: toText(api.deviceId),
     color: toText(api.colour),
     vehicleType: toText(api.lmsType ?? api.type),
+    smallImageUrl: toText(api.linkSmallImg, "") || undefined,
+    bigImageUrl: toText(api.linkBigImg, "") || undefined,
     imageUrl: toText(api.linkBigImg ?? api.linkSmallImg, "") || undefined,
   };
 }
@@ -279,7 +283,8 @@ async function fetchTelemetryByVin(vin: string) {
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
-export default function TileModule({ title, subtitle }: TileModuleProps) {
+export default function TileModule(props: TileModuleProps) {
+  void props;
   const [activeTab, setActiveTab] = useState<TabKey>("info");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -425,16 +430,12 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
   }, [selectedTelemetry]);
 
   return (
-    <div className="mx-auto w-full max-w-[1500px] rounded-2xl border border-[color:var(--tile-border)] bg-[color:var(--surface)] p-4 shadow-sm md:p-5">
-      <div className="mb-4 flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Modulo</p>
-          <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
-          {subtitle ? <p className="text-sm text-slate-500">{subtitle}</p> : null}
-        </div>
+    <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl border border-[color:var(--tile-border)] bg-[color:var(--surface)] p-2 shadow-sm md:p-3">
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5">
+        <h1 className="text-sm font-semibold uppercase tracking-[0.08em] text-slate-700">Equipment Records</h1>
         <Link
           href="/"
-          className="inline-flex items-center rounded-md border border-[color:var(--tile-border)] bg-[color:var(--tile)] px-3 py-2 text-sm font-medium text-[color:var(--foreground)] transition hover:bg-white"
+          className="inline-flex items-center rounded-md border border-[color:var(--tile-border)] bg-[color:var(--tile)] px-2.5 py-1 text-xs font-medium text-[color:var(--foreground)] transition hover:bg-white"
         >
           Volver al Launchpad
         </Link>
@@ -445,8 +446,8 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
       ) : error ? (
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
             <div className="border-b border-slate-100 p-3">
               <p className="text-sm font-semibold text-slate-800">Vehiculos ({vehicles.length})</p>
               <input
@@ -457,7 +458,7 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
               />
             </div>
 
-            <div className="max-h-[740px] overflow-y-auto">
+            <div className="min-h-0 flex-1 overflow-y-auto">
               {vehiclesBySector.map(([sector, sectorVehicles]) => (
                 <div key={sector} className="border-b border-slate-100">
                   <p className="bg-slate-100 px-3 py-1.5 text-xs font-bold uppercase text-slate-700">{sector}</p>
@@ -475,7 +476,16 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
                             : "border-l-transparent hover:bg-slate-50"
                         }`}
                       >
-                        <div className="h-8 w-8 rounded bg-slate-200" />
+                        <div className="h-8 w-8 overflow-hidden rounded bg-slate-200">
+                          {vehicle.smallImageUrl ? (
+                            <div
+                              role="img"
+                              aria-label={vehicle.label}
+                              className="h-full w-full bg-cover bg-center"
+                              style={{ backgroundImage: `url(${vehicle.smallImageUrl})` }}
+                            />
+                          ) : null}
+                        </div>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-slate-900">{vehicle.label}</p>
                           <p className="truncate text-xs text-slate-500">{vehicle.model}</p>
@@ -488,8 +498,8 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
             </div>
           </aside>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-3 md:p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-3 md:p-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
                   {selectedVehicle?.vehicleType !== "-" ? selectedVehicle?.vehicleType : "Vehiculo"}{" "}
@@ -519,10 +529,11 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
               </div>
             </div>
 
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             {activeTab === "info" && (
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="mb-3 flex h-64 items-center justify-center rounded bg-white">
+                  <div className="mb-3 flex h-56 items-center justify-center rounded bg-white xl:h-64">
                     {selectedVehicle?.imageUrl ? (
                       <div
                         role="img"
@@ -629,6 +640,7 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
                 <p className="text-xs text-slate-500">Timestamp: {selectedTelemetry?.timestamp ?? "-"}</p>
               </div>
             )}
+            </div>
           </section>
         </div>
       )}
