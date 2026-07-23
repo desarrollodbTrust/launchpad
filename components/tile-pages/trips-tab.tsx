@@ -394,8 +394,8 @@ function InteractiveChart({
             />
             <YAxis tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
             <Tooltip
-              formatter={(value: number, name: string) => [Number(value).toFixed(2), seriesLabel(name)]}
-              labelFormatter={(label: number) => formatTimestamp(chartData[label]?.timestamp ?? "")}
+              formatter={(value, name) => [Number(value ?? 0).toFixed(2), seriesLabel(String(name))]}
+              labelFormatter={(label) => formatTimestamp(chartData[Number(label)]?.timestamp ?? "")}
             />
             {renderSpeedOverlay ? (
               <>
