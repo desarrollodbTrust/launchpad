@@ -511,12 +511,43 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [showSpeedOverlay, setShowSpeedOverlay] = useState(false);
   const mapRef = useRef<google.maps.Map | null>(null);
+  const [runtimeMapsApiKey, setRuntimeMapsApiKey] = useState("");
 
-  const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+  const buildMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+  const googleMapsApiKey = buildMapsApiKey || runtimeMapsApiKey;
   const { isLoaded: isMapLoaded } = useJsApiLoader({
     id: "trip-map",
     googleMapsApiKey,
   });
+
+  useEffect(() => {
+    if (buildMapsApiKey) {
+      return;
+    }
+
+    let mounted = true;
+    const loadRuntimeKey = async () => {
+      try {
+        const response = await fetch("/api/public-config", { cache: "no-store" });
+        if (!response.ok || !mounted) {
+          return;
+        }
+
+        const payload = (await response.json()) as { googleMapsApiKey?: string };
+        const key = typeof payload.googleMapsApiKey === "string" ? payload.googleMapsApiKey.trim() : "";
+        if (key) {
+          setRuntimeMapsApiKey(key);
+        }
+      } catch {
+        // Ignore and keep empty key so UI can show guidance.
+      }
+    };
+
+    void loadRuntimeKey();
+    return () => {
+      mounted = false;
+    };
+  }, [buildMapsApiKey]);
 
   if (vin !== lastVin) {
     setLastVin(vin);
@@ -764,7 +795,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
                 <div className="overflow-hidden rounded border border-slate-200 bg-white">
                   {!googleMapsApiKey ? (
                     <div className="p-4 text-sm text-amber-700">
-                      Falta configurar NEXT_PUBLIC_GOOGLE_MAPS_API_KEY en .env.local para ver Google Maps.
+                      Falta configurar NEXT_PUBLIC_GOOGLE_MAPS_API_KEY en el entorno de build o en Cloud Run para ver Google Maps.
                     </div>
                   ) : !isMapLoaded ? (
                     <div className="p-4 text-sm text-slate-600">Cargando Google Maps...</div>
