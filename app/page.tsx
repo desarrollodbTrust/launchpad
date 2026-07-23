@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { launchpadSections } from "@/lib/tiles";
+import { visibleLaunchpadSections } from "@/lib/tiles";
 
 const accentStyles = [
   "from-cyan-400 to-blue-500",
@@ -26,7 +26,7 @@ export default function Home() {
           <span className="text-xs font-medium text-slate-500">Aplicaciones</span>
         </nav>
 
-        {launchpadSections.map((section) => (
+        {visibleLaunchpadSections.map((section) => (
           <section key={section.id} className="mb-7">
             <h2 className="mb-4 text-xl font-semibold tracking-tight text-slate-800 md:text-2xl">
               {section.title}
