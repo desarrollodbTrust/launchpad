@@ -34,3 +34,14 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Environment Variables
+
+Copy [`.env.example`](.env.example) to `.env.local` for local development and fill in the values.
+
+For Cloud Run, define the same variables in the service environment. The container will not read your local `.env.local` file.
+
+- `TENARIS_API_TOKEN`: bearer token used by the Tenaris proxy.
+- `TENARIS_API_KEY`: upstream API key sent as `x-api-key`.
+- `TENARIS_API_USER` and `TENARIS_API_PASSWORD`: used when basic auth is required.
+- `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`: browser key for the map view.
