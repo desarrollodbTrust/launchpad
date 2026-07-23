@@ -170,6 +170,44 @@ type NormalizedTelemetry = {
   timestamp: string;
 };
 
+const DEFAULT_IMAGE_URL = "/next.svg";
+
+function extractDriveFileId(url: string) {
+  const directMatch = url.match(/\/d\/([^/]+)/);
+  if (directMatch?.[1]) {
+    return directMatch[1];
+  }
+
+  try {
+    const parsed = new URL(url);
+    return parsed.searchParams.get("id") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function toProxyImageUrl(rawUrl?: string | null, fallback = DEFAULT_IMAGE_URL) {
+  const sourceUrl = (rawUrl ?? "").trim();
+  if (!sourceUrl) {
+    return fallback;
+  }
+
+  if (sourceUrl.startsWith("/api/drive-proxy?url=")) {
+    return sourceUrl;
+  }
+
+  let driveUrl = sourceUrl;
+  if (sourceUrl.includes("drive.google.com")) {
+    const fileId = extractDriveFileId(sourceUrl);
+    if (fileId) {
+      driveUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+    }
+    return `/api/drive-proxy?url=${encodeURIComponent(driveUrl)}`;
+  }
+
+  return sourceUrl;
+}
+
 function toText(value: unknown, fallback = "-") {
   if (value === null || value === undefined || value === "") {
     return fallback;
@@ -213,9 +251,9 @@ function normalizeVehicle(record: Record<string, unknown>): NormalizedVehicle | 
     deviceId: toText(api.deviceId),
     color: toText(api.colour),
     vehicleType: toText(api.lmsType ?? api.type),
-    smallImageUrl: toText(api.linkSmallImg, "") || undefined,
-    bigImageUrl: toText(api.linkBigImg, "") || undefined,
-    imageUrl: toText(api.linkBigImg ?? api.linkSmallImg, "") || undefined,
+    smallImageUrl: toProxyImageUrl(toText(api.linkSmallImg, "")),
+    bigImageUrl: toProxyImageUrl(toText(api.linkBigImg, "")),
+    imageUrl: toProxyImageUrl(toText(api.linkBigImg ?? api.linkSmallImg, "")),
   };
 }
 
