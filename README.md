@@ -44,4 +44,5 @@ For Cloud Run, define the same variables in the service environment. The contain
 - `TENARIS_API_TOKEN`: bearer token used by the Tenaris proxy.
 - `TENARIS_API_KEY`: upstream API key sent as `x-api-key`.
 - `TENARIS_API_USER` and `TENARIS_API_PASSWORD`: used when basic auth is required.
-- `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`: browser key for the map view.
+- `GOOGLE_MAPS_API_KEY`: runtime key served by `/api/public-config` in Cloud Run.
+- `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`: optional build-time fallback for the browser bundle.
