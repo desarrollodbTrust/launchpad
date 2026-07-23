@@ -495,6 +495,147 @@ function InteractiveChart({
   );
 }
 
+function TripsMapPanel({
+  googleMapsApiKey,
+  mapCenter,
+  routePath,
+  visualPoints,
+  selectedPoint,
+  onSelectPoint,
+  onClearPoint,
+}: {
+  googleMapsApiKey: string;
+  mapCenter: { lat: number; lng: number };
+  routePath: Array<{ lat: number; lng: number }>;
+  visualPoints: ObdPoint[];
+  selectedPoint: ObdPoint | null;
+  onSelectPoint: (index: number) => void;
+  onClearPoint: () => void;
+}) {
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const { isLoaded: isMapLoaded, loadError } = useJsApiLoader({
+    id: "trip-map",
+    googleMapsApiKey,
+  });
+
+  useEffect(() => {
+    if (!mapRef.current || routePath.length === 0 || typeof google === "undefined") {
+      return;
+    }
+
+    const bounds = new google.maps.LatLngBounds();
+    routePath.forEach((point) => {
+      bounds.extend(point);
+    });
+    mapRef.current.fitBounds(bounds);
+  }, [routePath]);
+
+  if (loadError) {
+    return (
+      <div className="p-4 text-sm text-rose-700">
+        No se pudo cargar Google Maps. Verifica la API key y las restricciones de dominio.
+      </div>
+    );
+  }
+
+  if (!isMapLoaded) {
+    return <div className="p-4 text-sm text-slate-600">Cargando Google Maps...</div>;
+  }
+
+  return (
+    <GoogleMap
+      mapContainerStyle={{ width: "100%", height: "420px" }}
+      center={mapCenter}
+      zoom={14}
+      onLoad={(map) => {
+        mapRef.current = map;
+      }}
+      onClick={(event) => {
+        const lat = event.latLng?.lat();
+        const lng = event.latLng?.lng();
+        if (lat === undefined || lng === undefined) {
+          return;
+        }
+        const nearest = findNearestPointIndex(visualPoints, lat, lng);
+        if (nearest !== null) {
+          onSelectPoint(nearest);
+        }
+      }}
+      options={{
+        mapTypeControl: true,
+        streetViewControl: false,
+        fullscreenControl: true,
+      }}
+    >
+      <PolylineF
+        path={routePath}
+        options={{
+          strokeColor: "#2563eb",
+          strokeWeight: 4,
+          clickable: true,
+        }}
+        onClick={(event) => {
+          const lat = event.latLng?.lat();
+          const lng = event.latLng?.lng();
+          if (lat === undefined || lng === undefined) {
+            return;
+          }
+          const nearest = findNearestPointIndex(visualPoints, lat, lng);
+          if (nearest !== null) {
+            onSelectPoint(nearest);
+          }
+        }}
+      />
+
+      {selectedPoint && (
+        <>
+          <MarkerF position={{ lat: selectedPoint.lat, lng: selectedPoint.lng }} />
+          <InfoWindowF
+            position={{ lat: selectedPoint.lat, lng: selectedPoint.lng }}
+            onCloseClick={onClearPoint}
+          >
+            <div className="space-y-1 text-xs text-slate-700">
+              <p>
+                <strong>Fecha:</strong> {formatTimestamp(selectedPoint.timestamp)}
+              </p>
+              <p>
+                <strong>Velocidad:</strong> {selectedPoint.speed.toFixed(2)} ({selectedPoint.speedSource})
+              </p>
+              <p>
+                <strong>Speed OBD Raw:</strong> {selectedPoint.speedObdRaw.toFixed(2)}
+              </p>
+              <p>
+                <strong>Speed GPS:</strong> {selectedPoint.speedGps.toFixed(2)}
+              </p>
+              <p>
+                <strong>RPM:</strong> {selectedPoint.rpm.toFixed(2)}
+              </p>
+              <p>
+                <strong>Temperatura:</strong> {selectedPoint.waterTemp.toFixed(2)}
+              </p>
+              <p>
+                <strong>Bateria:</strong> {selectedPoint.battery.toFixed(2)}
+              </p>
+              <p>
+                <strong>Presion Aceite:</strong> {selectedPoint.oilPressure.toFixed(2)}
+              </p>
+              <p>
+                <strong>Status:</strong> {selectedPoint.status} · <strong>In Travel:</strong> {selectedPoint.inTravel ? "true" : "false"}
+              </p>
+              <p>
+                <strong>HDOP:</strong> {selectedPoint.hdop.toFixed(2)} · <strong>Angulo:</strong> {selectedPoint.angle.toFixed(2)}
+              </p>
+              <p>
+                <strong>Alertas:</strong> {buildAlerts(selectedPoint).join(", ") || "Sin alertas"}
+              </p>
+            </div>
+          </InfoWindowF>
+        </>
+      )}
+    </GoogleMap>
+  );
+}
+
 export default function TripsTab({ vin, active }: TripsTabProps) {
   const [trips, setTrips] = useState<TripRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -510,15 +651,10 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
   const [lastVin, setLastVin] = useState(vin);
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [showSpeedOverlay, setShowSpeedOverlay] = useState(false);
-  const mapRef = useRef<google.maps.Map | null>(null);
   const [runtimeMapsApiKey, setRuntimeMapsApiKey] = useState("");
 
   const buildMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
   const googleMapsApiKey = buildMapsApiKey || runtimeMapsApiKey;
-  const { isLoaded: isMapLoaded } = useJsApiLoader({
-    id: "trip-map",
-    googleMapsApiKey,
-  });
 
   useEffect(() => {
     if (buildMapsApiKey) {
@@ -651,18 +787,6 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
     selectedPointIndex !== null && selectedPointIndex >= 0 && selectedPointIndex < visualPoints.length
       ? visualPoints[selectedPointIndex]
       : null;
-
-  useEffect(() => {
-    if (!mapRef.current || routePath.length === 0 || typeof google === "undefined") {
-      return;
-    }
-
-    const bounds = new google.maps.LatLngBounds();
-    routePath.forEach((point) => {
-      bounds.extend(point);
-    });
-    mapRef.current.fitBounds(bounds);
-  }, [routePath]);
 
   const showList = mode === "list";
   const showMap = mode === "map" || mode === "combined";
@@ -797,99 +921,16 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
                     <div className="p-4 text-sm text-amber-700">
                       Falta configurar NEXT_PUBLIC_GOOGLE_MAPS_API_KEY en el entorno de build o en Cloud Run para ver Google Maps.
                     </div>
-                  ) : !isMapLoaded ? (
-                    <div className="p-4 text-sm text-slate-600">Cargando Google Maps...</div>
                   ) : (
-                    <GoogleMap
-                      mapContainerStyle={{ width: "100%", height: "420px" }}
-                      center={mapCenter}
-                      zoom={14}
-                      onLoad={(map) => {
-                        mapRef.current = map;
-                      }}
-                      onClick={(event) => {
-                        const lat = event.latLng?.lat();
-                        const lng = event.latLng?.lng();
-                        if (lat === undefined || lng === undefined) {
-                          return;
-                        }
-                        const nearest = findNearestPointIndex(visualPoints, lat, lng);
-                        if (nearest !== null) {
-                          setSelectedPointIndex(nearest);
-                        }
-                      }}
-                      options={{
-                        mapTypeControl: true,
-                        streetViewControl: false,
-                        fullscreenControl: true,
-                      }}
-                    >
-                      <PolylineF
-                        path={routePath}
-                        options={{
-                          strokeColor: "#2563eb",
-                          strokeWeight: 4,
-                          clickable: true,
-                        }}
-                        onClick={(event) => {
-                          const lat = event.latLng?.lat();
-                          const lng = event.latLng?.lng();
-                          if (lat === undefined || lng === undefined) {
-                            return;
-                          }
-                          const nearest = findNearestPointIndex(visualPoints, lat, lng);
-                          if (nearest !== null) {
-                            setSelectedPointIndex(nearest);
-                          }
-                        }}
-                      />
-
-                      {selectedPoint && (
-                        <>
-                          <MarkerF position={{ lat: selectedPoint.lat, lng: selectedPoint.lng }} />
-                          <InfoWindowF
-                            position={{ lat: selectedPoint.lat, lng: selectedPoint.lng }}
-                            onCloseClick={() => setSelectedPointIndex(null)}
-                          >
-                            <div className="space-y-1 text-xs text-slate-700">
-                              <p>
-                                <strong>Fecha:</strong> {formatTimestamp(selectedPoint.timestamp)}
-                              </p>
-                              <p>
-                                <strong>Velocidad:</strong> {selectedPoint.speed.toFixed(2)} ({selectedPoint.speedSource})
-                              </p>
-                              <p>
-                                <strong>Speed OBD Raw:</strong> {selectedPoint.speedObdRaw.toFixed(2)}
-                              </p>
-                              <p>
-                                <strong>Speed GPS:</strong> {selectedPoint.speedGps.toFixed(2)}
-                              </p>
-                              <p>
-                                <strong>RPM:</strong> {selectedPoint.rpm.toFixed(2)}
-                              </p>
-                              <p>
-                                <strong>Temperatura:</strong> {selectedPoint.waterTemp.toFixed(2)}
-                              </p>
-                              <p>
-                                <strong>Bateria:</strong> {selectedPoint.battery.toFixed(2)}
-                              </p>
-                              <p>
-                                <strong>Presion Aceite:</strong> {selectedPoint.oilPressure.toFixed(2)}
-                              </p>
-                              <p>
-                                <strong>Status:</strong> {selectedPoint.status} · <strong>In Travel:</strong> {selectedPoint.inTravel ? "true" : "false"}
-                              </p>
-                              <p>
-                                <strong>HDOP:</strong> {selectedPoint.hdop.toFixed(2)} · <strong>Angulo:</strong> {selectedPoint.angle.toFixed(2)}
-                              </p>
-                              <p>
-                                <strong>Alertas:</strong> {buildAlerts(selectedPoint).join(", ") || "Sin alertas"}
-                              </p>
-                            </div>
-                          </InfoWindowF>
-                        </>
-                      )}
-                    </GoogleMap>
+                    <TripsMapPanel
+                      googleMapsApiKey={googleMapsApiKey}
+                      mapCenter={mapCenter}
+                      routePath={routePath}
+                      visualPoints={visualPoints}
+                      selectedPoint={selectedPoint}
+                      onSelectPoint={(index) => setSelectedPointIndex(index)}
+                      onClearPoint={() => setSelectedPointIndex(null)}
+                    />
                   )}
                 </div>
               )}
