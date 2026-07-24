@@ -108,6 +108,22 @@ type TripsTabProps = {
 
 const MAX_VISUAL_POINTS = 1200;
 const FALLBACK_TIME_ZONE = "America/Argentina/Buenos_Aires";
+const TRIP_ZOOM_RULES = [
+  { lat: 0.008, lng: 0.017, zoom: 15 },
+  { lat: 0.014, lng: 0.04, zoom: 14 },
+  { lat: 0.03, lng: 0.07, zoom: 13 },
+  { lat: 0.07, lng: 0.15, zoom: 12 },
+  { lat: 0.13, lng: 0.32, zoom: 11 },
+  { lat: 0.32, lng: 0.64, zoom: 10 },
+  { lat: 0.64, lng: 1.28, zoom: 9 },
+  { lat: 1.28, lng: 2.56, zoom: 8 },
+  { lat: 2.56, lng: 4.12, zoom: 7 },
+  { lat: 5.12, lng: 10.24, zoom: 6 },
+  { lat: 10.24, lng: 20.48, zoom: 5 },
+  { lat: 20.48, lng: 40.96, zoom: 4 },
+  { lat: 40.96, lng: 81.92, zoom: 3 },
+  { lat: 999, lng: 999, zoom: 2 },
+] as const;
 
 function toText(value: unknown, fallback = "-") {
   if (value === null || value === undefined || value === "") {
@@ -373,6 +389,28 @@ function findNearestPointIndex(points: ObdPoint[], lat: number, lng: number) {
   return nearest;
 }
 
+function getTripZoom(difLat: number, difLng: number) {
+  for (const rule of TRIP_ZOOM_RULES) {
+    if (difLat <= rule.lat && difLng < rule.lng) {
+      return rule.zoom;
+    }
+  }
+  return 2;
+}
+
+function computeRouteZoom(routePath: Array<{ lat: number; lng: number }>) {
+  if (routePath.length < 2) {
+    return 14;
+  }
+
+  const first = routePath[0];
+  const last = routePath[routePath.length - 1];
+  const difLat = Math.abs(first.lat - last.lat);
+  const difLng = Math.abs(first.lng - last.lng);
+
+  return getTripZoom(difLat, difLng);
+}
+
 function InteractiveChart({
   points,
   metric,
@@ -558,6 +596,7 @@ function InteractiveChart({
 function TripsMapPanel({
   googleMapsApiKey,
   mapCenter,
+  mapZoom,
   routePath,
   visualPoints,
   selectedPoint,
@@ -566,6 +605,7 @@ function TripsMapPanel({
 }: {
   googleMapsApiKey: string;
   mapCenter: { lat: number; lng: number };
+  mapZoom: number;
   routePath: Array<{ lat: number; lng: number }>;
   visualPoints: ObdPoint[];
   selectedPoint: ObdPoint | null;
@@ -577,18 +617,6 @@ function TripsMapPanel({
     id: "trip-map",
     googleMapsApiKey,
   });
-
-  useEffect(() => {
-    if (!mapRef.current || routePath.length === 0 || typeof google === "undefined") {
-      return;
-    }
-
-    const bounds = new google.maps.LatLngBounds();
-    routePath.forEach((point) => {
-      bounds.extend(point);
-    });
-    mapRef.current.fitBounds(bounds);
-  }, [routePath]);
 
   if (loadError) {
     return (
@@ -606,9 +634,11 @@ function TripsMapPanel({
     <GoogleMap
       mapContainerStyle={{ width: "100%", height: "420px" }}
       center={mapCenter}
-      zoom={14}
+      zoom={mapZoom}
       onLoad={(map) => {
         mapRef.current = map;
+        map.setCenter(mapCenter);
+        map.setZoom(mapZoom);
       }}
       onClick={(event) => {
         const lat = event.latLng?.lat();
@@ -864,6 +894,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
       lng: (minLng + maxLng) / 2,
     };
   }, [routePath]);
+  const mapZoom = useMemo(() => computeRouteZoom(routePath), [routePath]);
   const selectedPoint =
     selectedPointIndex !== null && selectedPointIndex >= 0 && selectedPointIndex < visualPoints.length
       ? visualPoints[selectedPointIndex]
@@ -1006,6 +1037,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
                     <TripsMapPanel
                       googleMapsApiKey={googleMapsApiKey}
                       mapCenter={mapCenter}
+                      mapZoom={mapZoom}
                       routePath={routePath}
                       visualPoints={visualPoints}
                       selectedPoint={selectedPoint}
