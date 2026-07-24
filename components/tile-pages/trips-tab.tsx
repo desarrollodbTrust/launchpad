@@ -403,10 +403,20 @@ function computeRouteZoom(routePath: Array<{ lat: number; lng: number }>) {
     return 14;
   }
 
-  const first = routePath[0];
-  const last = routePath[routePath.length - 1];
-  const difLat = Math.abs(first.lat - last.lat);
-  const difLng = Math.abs(first.lng - last.lng);
+  let minLat = routePath[0].lat;
+  let maxLat = routePath[0].lat;
+  let minLng = routePath[0].lng;
+  let maxLng = routePath[0].lng;
+
+  for (const point of routePath) {
+    if (point.lat < minLat) minLat = point.lat;
+    if (point.lat > maxLat) maxLat = point.lat;
+    if (point.lng < minLng) minLng = point.lng;
+    if (point.lng > maxLng) maxLng = point.lng;
+  }
+
+  const difLat = Math.abs(maxLat - minLat);
+  const difLng = Math.abs(maxLng - minLng);
 
   return getTripZoom(difLat, difLng);
 }
