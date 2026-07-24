@@ -107,6 +107,7 @@ type TripsTabProps = {
 };
 
 const MAX_VISUAL_POINTS = 1200;
+const FALLBACK_TIME_ZONE = "America/Argentina/Buenos_Aires";
 
 function toText(value: unknown, fallback = "-") {
   if (value === null || value === undefined || value === "") {
@@ -261,11 +262,70 @@ function seriesLabel(series: string) {
 }
 
 function formatTimestamp(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
+  const date = parseUtcTimestamp(value);
+  if (!date) {
+    return value || "-";
   }
-  return date.toLocaleString();
+  return formatInUserTimeZone(date);
+}
+
+function parseUtcTimestamp(value: string) {
+  const raw = value.trim();
+  if (!raw) {
+    return null;
+  }
+
+  let normalized = raw.replace(" ", "T");
+  const hasTimezone = /(Z|[+-]\d{2}:\d{2}|[+-]\d{4})$/.test(normalized);
+
+  if (!hasTimezone && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(normalized)) {
+    normalized = `${normalized}Z`;
+  }
+
+  if (/^[+-]\d{4}$/.test(normalized.slice(-5))) {
+    normalized = `${normalized.slice(0, -5)}${normalized.slice(-5, -2)}:${normalized.slice(-2)}`;
+  }
+
+  const parsed = new Date(normalized);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
+  const fallback = new Date(`${raw}Z`);
+  if (!Number.isNaN(fallback.getTime())) {
+    return fallback;
+  }
+
+  return null;
+}
+
+function getDisplayTimeZone() {
+  try {
+    const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return browserTimeZone || FALLBACK_TIME_ZONE;
+  } catch {
+    return FALLBACK_TIME_ZONE;
+  }
+}
+
+function formatInUserTimeZone(date: Date) {
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    timeZone: getDisplayTimeZone(),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  return formatter.format(date);
+}
+
+function toUtcMillis(value: string) {
+  const parsed = parseUtcTimestamp(value);
+  return parsed ? parsed.getTime() : 0;
 }
 
 function buildAlerts(point: ObdPoint) {
@@ -714,7 +774,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
           .filter((item): item is TripApi => typeof item === "object" && item !== null)
           .map(normalizeTrip)
           .filter((item): item is TripRow => item !== null)
-          .sort((a, b) => Date.parse(b.startTime) - Date.parse(a.startTime));
+          .sort((a, b) => toUtcMillis(b.startTime) - toUtcMillis(a.startTime));
 
         setTrips(normalized);
         setTotalPages(payload.totalPages);
@@ -755,10 +815,10 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
           .filter((item): item is ObdPointApi => typeof item === "object" && item !== null)
           .map(normalizeObdPoint)
           .filter((item): item is ObdPoint => item !== null)
-          .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+          .sort((a, b) => toUtcMillis(a.timestamp) - toUtcMillis(b.timestamp));
 
         setObdPoints(normalized);
-        setSelectedPointIndex(normalized.length > 0 ? 0 : null);
+        setSelectedPointIndex(null);
       } catch {
         if (mounted) {
           setObdPoints([]);
@@ -782,7 +842,28 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
     () => visualPoints.map((point) => ({ lat: point.lat, lng: point.lng })),
     [visualPoints]
   );
-  const mapCenter = routePath[0] ?? { lat: -34.6, lng: -58.4 };
+  const mapCenter = useMemo(() => {
+    if (routePath.length === 0) {
+      return { lat: -34.6, lng: -58.4 };
+    }
+
+    let minLat = routePath[0].lat;
+    let maxLat = routePath[0].lat;
+    let minLng = routePath[0].lng;
+    let maxLng = routePath[0].lng;
+
+    for (const point of routePath) {
+      if (point.lat < minLat) minLat = point.lat;
+      if (point.lat > maxLat) maxLat = point.lat;
+      if (point.lng < minLng) minLng = point.lng;
+      if (point.lng > maxLng) maxLng = point.lng;
+    }
+
+    return {
+      lat: (minLat + maxLat) / 2,
+      lng: (minLng + maxLng) / 2,
+    };
+  }, [routePath]);
   const selectedPoint =
     selectedPointIndex !== null && selectedPointIndex >= 0 && selectedPointIndex < visualPoints.length
       ? visualPoints[selectedPointIndex]
@@ -838,7 +919,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
                       }}
                     >
                       <td className="px-3 py-2">{trip.driver}</td>
-                      <td className="px-3 py-2">{trip.startTime}</td>
+                      <td className="px-3 py-2">{formatTimestamp(trip.startTime)}</td>
                       <td className="px-3 py-2">{trip.length}</td>
                       <td className="px-3 py-2">{trip.stopped}</td>
                       <td className="px-3 py-2">{trip.distance}</td>
@@ -882,7 +963,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm text-slate-700">
               <p>
-                Viaje seleccionado: {selectedTrip.startTime} - {selectedTrip.endTime}
+                Viaje seleccionado: {formatTimestamp(selectedTrip.startTime)} - {formatTimestamp(selectedTrip.endTime)}
               </p>
               <p className="text-xs text-slate-500">
                 Driver: {selectedTrip.driver} · Distancia: {selectedTrip.distance} · Velocidad max: {selectedTrip.maxSpeed}

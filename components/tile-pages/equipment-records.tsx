@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import TripsTab from "@/components/tile-pages/trips-tab";
+import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 
 type TileModuleProps = {
   title: string;
@@ -171,6 +172,8 @@ type NormalizedTelemetry = {
 };
 
 const DEFAULT_IMAGE_URL = "/next.svg";
+const TELEMETRY_POLL_INTERVAL_MS = 15_000;
+const FALLBACK_TIME_ZONE = "America/Argentina/Buenos_Aires";
 
 function extractDriveFileId(url: string) {
   const directMatch = url.match(/\/d\/([^/]+)/);
@@ -287,6 +290,169 @@ function normalizeTelemetry(record: Record<string, unknown>): NormalizedTelemetr
   };
 }
 
+function telemetryEquals(current?: NormalizedTelemetry, next?: NormalizedTelemetry) {
+  if (current === next) {
+    return true;
+  }
+  if (!current || !next) {
+    return false;
+  }
+
+  return (
+    current.vin === next.vin &&
+    current.speed === next.speed &&
+    current.rpm === next.rpm &&
+    current.temp === next.temp &&
+    current.mileage === next.mileage &&
+    current.usedHours === next.usedHours &&
+    current.odometer === next.odometer &&
+    current.lastConnection === next.lastConnection &&
+    current.battery === next.battery &&
+    current.failures === next.failures &&
+    current.waterTemp === next.waterTemp &&
+    current.oilPressure === next.oilPressure &&
+    current.inletPressure === next.inletPressure &&
+    current.lat === next.lat &&
+    current.lng === next.lng &&
+    current.timestamp === next.timestamp
+  );
+}
+
+function formatTimestamp(value: string) {
+  const date = parseUtcTimestamp(value);
+  if (!date) {
+    return value || "-";
+  }
+  return formatInUserTimeZone(date);
+}
+
+function parseUtcTimestamp(value: string) {
+  const raw = value.trim();
+  if (!raw) {
+    return null;
+  }
+
+  let normalized = raw.replace(" ", "T");
+  const hasTimezone = /(Z|[+-]\d{2}:\d{2}|[+-]\d{4})$/.test(normalized);
+
+  if (!hasTimezone && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(normalized)) {
+    normalized = `${normalized}Z`;
+  }
+
+  if (/^[+-]\d{4}$/.test(normalized.slice(-5))) {
+    normalized = `${normalized.slice(0, -5)}${normalized.slice(-5, -2)}:${normalized.slice(-2)}`;
+  }
+
+  const parsed = new Date(normalized);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
+  const fallback = new Date(`${raw}Z`);
+  if (!Number.isNaN(fallback.getTime())) {
+    return fallback;
+  }
+
+  return null;
+}
+
+function getDisplayTimeZone() {
+  try {
+    const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return browserTimeZone || FALLBACK_TIME_ZONE;
+  } catch {
+    return FALLBACK_TIME_ZONE;
+  }
+}
+
+function formatInUserTimeZone(date: Date) {
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    timeZone: getDisplayTimeZone(),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  return formatter.format(date);
+}
+
+function PositionMap({
+  lat,
+  lng,
+  timestamp,
+  googleMapsApiKey,
+}: {
+  lat: number;
+  lng: number;
+  timestamp: string;
+  googleMapsApiKey: string;
+}) {
+  const [showInfo, setShowInfo] = useState(false);
+  const { isLoaded, loadError } = useJsApiLoader({
+    id: "position-map",
+    googleMapsApiKey,
+  });
+
+  if (!googleMapsApiKey) {
+    return (
+      <div className="flex h-[520px] items-center justify-center p-4 text-center text-sm text-slate-600">
+        No se encontro Google Maps API key. Configura NEXT_PUBLIC_GOOGLE_MAPS_API_KEY o /api/public-config.
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex h-[520px] items-center justify-center p-4 text-center text-sm text-rose-700">
+        No se pudo cargar Google Maps.
+      </div>
+    );
+  }
+
+  if (!isLoaded) {
+    return <div className="flex h-[520px] items-center justify-center text-sm text-slate-600">Cargando mapa...</div>;
+  }
+
+  return (
+    <GoogleMap
+      mapContainerStyle={{ width: "100%", height: "520px" }}
+      center={{ lat, lng }}
+      zoom={16}
+      onClick={() => setShowInfo(false)}
+      options={{
+        mapTypeControl: true,
+        streetViewControl: false,
+        fullscreenControl: true,
+      }}
+    >
+      <MarkerF
+        position={{ lat, lng }}
+        onClick={() => {
+          setShowInfo(true);
+        }}
+      />
+
+      {showInfo && (
+        <InfoWindowF
+          position={{ lat, lng }}
+          onCloseClick={() => {
+            setShowInfo(false);
+          }}
+        >
+          <div className="text-xs text-slate-700">
+            <p>
+              <strong>Fecha y hora:</strong> {formatTimestamp(timestamp)}
+            </p>
+          </div>
+        </InfoWindowF>
+      )}
+    </GoogleMap>
+  );
+}
+
 async function fetchJson(url: string): Promise<unknown[]> {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
@@ -329,8 +495,45 @@ export default function TileModule(props: TileModuleProps) {
   const [error, setError] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<NormalizedVehicle[]>([]);
   const [telemetryByVin, setTelemetryByVin] = useState<Record<string, NormalizedTelemetry | undefined>>({});
-  const [telemetryLoading, setTelemetryLoading] = useState(false);
+  const [telemetryFetching, setTelemetryFetching] = useState(false);
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  const [telemetryLastRequestByVin, setTelemetryLastRequestByVin] = useState<Record<string, string>>({});
   const [selectedVin, setSelectedVin] = useState<string>("");
+  const [runtimeMapsApiKey, setRuntimeMapsApiKey] = useState("");
+  const telemetryInFlightRef = useRef(false);
+
+  const buildMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+  const googleMapsApiKey = buildMapsApiKey || runtimeMapsApiKey;
+
+  useEffect(() => {
+    if (buildMapsApiKey) {
+      return;
+    }
+
+    let mounted = true;
+    const loadRuntimeKey = async () => {
+      try {
+        const response = await fetch("/api/public-config", { cache: "no-store" });
+        if (!response.ok || !mounted) {
+          return;
+        }
+
+        const payload = (await response.json()) as { googleMapsApiKey?: string };
+        const key = typeof payload.googleMapsApiKey === "string" ? payload.googleMapsApiKey.trim() : "";
+        if (key) {
+          setRuntimeMapsApiKey(key);
+        }
+      } catch {
+        // Ignore and keep empty key so UI can show guidance.
+      }
+    };
+
+    void loadRuntimeKey();
+
+    return () => {
+      mounted = false;
+    };
+  }, [buildMapsApiKey]);
 
   useEffect(() => {
     let mounted = true;
@@ -351,6 +554,7 @@ export default function TileModule(props: TileModuleProps) {
 
         setVehicles(normalizedVehicles);
         setTelemetryByVin({});
+        setTelemetryLastRequestByVin({});
 
         if (normalizedVehicles.length > 0) {
           setSelectedVin((current) => {
@@ -379,22 +583,25 @@ export default function TileModule(props: TileModuleProps) {
   }, []);
 
   useEffect(() => {
-    if (!selectedVin) {
-      return;
-    }
-
-    if (activeTab !== "telemetry" && activeTab !== "map") {
-      return;
-    }
-
-    if (telemetryByVin[selectedVin]) {
+    if (!selectedVin || telemetryByVin[selectedVin]) {
       return;
     }
 
     let mounted = true;
+
     const loadTelemetry = async () => {
-      setTelemetryLoading(true);
-      setError(null);
+      if (telemetryInFlightRef.current) {
+        return;
+      }
+
+      telemetryInFlightRef.current = true;
+      setTelemetryFetching(true);
+      setTelemetryLastRequestByVin((current) => ({
+        ...current,
+        [selectedVin]: new Date().toISOString(),
+      }));
+      setTelemetryError((current) => (current === null ? current : null));
+
       try {
         const rows = await fetchTelemetryByVin(selectedVin);
         if (!mounted) {
@@ -407,18 +614,28 @@ export default function TileModule(props: TileModuleProps) {
           .filter((item): item is NormalizedTelemetry => item !== null);
 
         const selected = normalized.find((item) => item.vin === selectedVin) ?? normalized[0];
-        setTelemetryByVin((current) => ({
-          ...current,
-          [selectedVin]: selected,
-        }));
+
+        setTelemetryByVin((current) => {
+          const previous = current[selectedVin];
+          if (telemetryEquals(previous, selected)) {
+            return current;
+          }
+
+          return {
+            ...current,
+            [selectedVin]: selected,
+          };
+        });
       } catch (loadError) {
         if (mounted) {
-          setError(loadError instanceof Error ? loadError.message : "Error cargando telemetria");
+          const nextError = loadError instanceof Error ? loadError.message : "Error cargando telemetria";
+          setTelemetryError((current) => (current === nextError ? current : nextError));
         }
       } finally {
         if (mounted) {
-          setTelemetryLoading(false);
+          setTelemetryFetching(false);
         }
+        telemetryInFlightRef.current = false;
       }
     };
 
@@ -427,7 +644,79 @@ export default function TileModule(props: TileModuleProps) {
     return () => {
       mounted = false;
     };
-  }, [activeTab, selectedVin, telemetryByVin]);
+  }, [selectedVin, telemetryByVin]);
+
+  useEffect(() => {
+    if (!selectedVin) {
+      return;
+    }
+
+    if (activeTab !== "telemetry" && activeTab !== "map") {
+      return;
+    }
+
+    let mounted = true;
+
+    const loadTelemetry = async () => {
+      if (telemetryInFlightRef.current) {
+        return;
+      }
+
+      telemetryInFlightRef.current = true;
+      setTelemetryFetching(true);
+      setTelemetryLastRequestByVin((current) => ({
+        ...current,
+        [selectedVin]: new Date().toISOString(),
+      }));
+      setTelemetryError((current) => (current === null ? current : null));
+
+      try {
+        const rows = await fetchTelemetryByVin(selectedVin);
+        if (!mounted) {
+          return;
+        }
+
+        const normalized = rows
+          .filter((item): item is Record<string, unknown> => isRecord(item))
+          .map(normalizeTelemetry)
+          .filter((item): item is NormalizedTelemetry => item !== null);
+
+        const selected = normalized.find((item) => item.vin === selectedVin) ?? normalized[0];
+
+        setTelemetryByVin((current) => {
+          const previous = current[selectedVin];
+          if (telemetryEquals(previous, selected)) {
+            return current;
+          }
+
+          return {
+            ...current,
+            [selectedVin]: selected,
+          };
+        });
+      } catch (loadError) {
+        if (mounted) {
+          const nextError = loadError instanceof Error ? loadError.message : "Error cargando telemetria";
+          setTelemetryError((current) => (current === nextError ? current : nextError));
+        }
+      } finally {
+        if (mounted) {
+          setTelemetryFetching(false);
+        }
+        telemetryInFlightRef.current = false;
+      }
+    };
+
+    void loadTelemetry();
+    const intervalId = setInterval(() => {
+      void loadTelemetry();
+    }, TELEMETRY_POLL_INTERVAL_MS);
+
+    return () => {
+      mounted = false;
+      clearInterval(intervalId);
+    };
+  }, [activeTab, selectedVin]);
 
   const selectedVehicle = useMemo(
     () => vehicles.find((vehicle) => vehicle.vin === selectedVin) ?? null,
@@ -435,6 +724,8 @@ export default function TileModule(props: TileModuleProps) {
   );
 
   const selectedTelemetry = useMemo(() => telemetryByVin[selectedVin] ?? null, [telemetryByVin, selectedVin]);
+  const telemetryLoading = telemetryFetching && !selectedTelemetry;
+  const selectedTelemetryLastRequest = telemetryLastRequestByVin[selectedVin] ?? "";
 
   const visibleVehicles = useMemo(() => {
     if (!search.trim()) {
@@ -460,11 +751,15 @@ export default function TileModule(props: TileModuleProps) {
     return Array.from(grouped.entries());
   }, [visibleVehicles]);
 
-  const mapSrc = useMemo(() => {
+  const selectedPosition = useMemo(() => {
     if (selectedTelemetry?.lat === undefined || selectedTelemetry?.lng === undefined) {
       return null;
     }
-    return `https://www.google.com/maps?q=${selectedTelemetry.lat},${selectedTelemetry.lng}&z=16&output=embed`;
+    return {
+      lat: selectedTelemetry.lat,
+      lng: selectedTelemetry.lng,
+      timestamp: selectedTelemetry.timestamp,
+    };
   }, [selectedTelemetry]);
 
   return (
@@ -544,6 +839,15 @@ export default function TileModule(props: TileModuleProps) {
                   {selectedVehicle?.label ?? "Sin seleccion"}
                 </h2>
                 <p className="text-xs text-slate-500">LIC_PLATE: {selectedVehicle?.licPlate ?? "-"}</p>
+                <p className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500">
+                  <span>Ultima act: {formatTimestamp(selectedTelemetryLastRequest)}</span>
+                  {telemetryFetching && (
+                    <span
+                      aria-label="Cargando telemetria"
+                      className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600"
+                    />
+                  )}
+                </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 {[
@@ -619,26 +923,33 @@ export default function TileModule(props: TileModuleProps) {
               telemetryLoading ? (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">Cargando telemetria...</div>
               ) : (
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-                  {[
-                    { label: "Mileage", value: selectedTelemetry?.mileage },
-                    { label: "Use Hours", value: selectedTelemetry?.usedHours },
-                    { label: "Odometer", value: selectedTelemetry?.odometer },
-                    { label: "Last Connection", value: selectedTelemetry?.lastConnection },
-                    { label: "Speed", value: selectedTelemetry?.speed },
-                    { label: "RPM", value: selectedTelemetry?.rpm },
-                    { label: "Failures", value: selectedTelemetry?.failures },
-                    { label: "Battery", value: selectedTelemetry?.battery },
-                    { label: "Water Temp", value: selectedTelemetry?.waterTemp },
-                    { label: "Oil Pressure", value: selectedTelemetry?.oilPressure },
-                    { label: "Inlet Pressure", value: selectedTelemetry?.inletPressure },
-                    { label: "Max Temp", value: selectedTelemetry?.temp },
-                  ].map((item) => (
-                    <article key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-xs uppercase tracking-[0.08em] text-slate-500">{item.label}</p>
-                      <p className="mt-2 text-lg font-semibold text-slate-900">{item.value ?? "-"}</p>
-                    </article>
-                  ))}
+                <div className="space-y-3">
+                  {telemetryError && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                      {telemetryError}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+                    {[
+                      { label: "Mileage", value: selectedTelemetry?.mileage },
+                      { label: "Use Hours", value: selectedTelemetry?.usedHours },
+                      { label: "Odometer", value: selectedTelemetry?.odometer },
+                      { label: "Last Connection", value: formatTimestamp(selectedTelemetry?.lastConnection ?? "") },
+                      { label: "Speed", value: selectedTelemetry?.speed },
+                      { label: "RPM", value: selectedTelemetry?.rpm },
+                      { label: "Failures", value: selectedTelemetry?.failures },
+                      { label: "Battery", value: selectedTelemetry?.battery },
+                      { label: "Water Temp", value: selectedTelemetry?.waterTemp },
+                      { label: "Oil Pressure", value: selectedTelemetry?.oilPressure },
+                      { label: "Inlet Pressure", value: selectedTelemetry?.inletPressure },
+                      { label: "Max Temp", value: selectedTelemetry?.temp },
+                    ].map((item) => (
+                      <article key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs uppercase tracking-[0.08em] text-slate-500">{item.label}</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{item.value ?? "-"}</p>
+                      </article>
+                    ))}
+                  </div>
                 </div>
               )
             )}
@@ -662,12 +973,13 @@ export default function TileModule(props: TileModuleProps) {
                 </div>
 
                 <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                  {mapSrc ? (
-                    <iframe
-                      title="Ultima posicion"
-                      src={mapSrc}
-                      className="h-[520px] w-full"
-                      loading="lazy"
+                  {selectedPosition ? (
+                    <PositionMap
+                      key={`${selectedPosition.lat}-${selectedPosition.lng}-${selectedPosition.timestamp}`}
+                      lat={selectedPosition.lat}
+                      lng={selectedPosition.lng}
+                      timestamp={selectedPosition.timestamp}
+                      googleMapsApiKey={googleMapsApiKey}
                     />
                   ) : (
                     <div className="flex h-[520px] items-center justify-center text-sm text-slate-500">
@@ -675,7 +987,8 @@ export default function TileModule(props: TileModuleProps) {
                     </div>
                   )}
                 </div>
-                <p className="text-xs text-slate-500">Timestamp: {selectedTelemetry?.timestamp ?? "-"}</p>
+                <p className="text-xs text-slate-500">Timestamp: {formatTimestamp(selectedTelemetry?.timestamp ?? "")}</p>
+                {telemetryError && <p className="text-xs text-rose-700">{telemetryError}</p>}
               </div>
             )}
             </div>
