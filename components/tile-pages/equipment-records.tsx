@@ -834,11 +834,11 @@ export default function TileModule(props: TileModuleProps) {
           <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-3 md:p-4">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">
+                {/* <h2 className="text-lg font-semibold text-slate-900">
                   {selectedVehicle?.vehicleType !== "-" ? selectedVehicle?.vehicleType : "Vehiculo"}{" "}
                   {selectedVehicle?.label ?? "Sin seleccion"}
-                </h2>
-                <p className="text-xs text-slate-500">LIC_PLATE: {selectedVehicle?.licPlate ?? "-"}</p>
+                </h2> */}
+                <h2 className="text-lg font-semibold text-slate-900">LIC_PLATE: {selectedVehicle?.licPlate ?? "-"}</h2>
                 <p className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500">
                   <span>Ultima act: {formatTimestamp(selectedTelemetryLastRequest)}</span>
                   {telemetryFetching && (
