@@ -618,6 +618,16 @@ function TripsMapPanel({
     googleMapsApiKey,
   });
 
+  useEffect(() => {
+    if (!mapRef.current) {
+      return;
+    }
+
+    mapRef.current.setCenter(mapCenter);
+    mapRef.current.setZoom(mapZoom);
+    mapRef.current.setMapTypeId("satellite");
+  }, [mapCenter, mapZoom, routePath]);
+
   if (loadError) {
     return (
       <div className="p-4 text-sm text-rose-700">
@@ -639,6 +649,7 @@ function TripsMapPanel({
         mapRef.current = map;
         map.setCenter(mapCenter);
         map.setZoom(mapZoom);
+        map.setMapTypeId("satellite");
       }}
       onClick={(event) => {
         const lat = event.latLng?.lat();
@@ -653,6 +664,7 @@ function TripsMapPanel({
       }}
       options={{
         mapTypeControl: true,
+        mapTypeId: "satellite",
         streetViewControl: false,
         fullscreenControl: true,
       }}
