@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Brush,
   CartesianGrid,
@@ -628,6 +628,19 @@ function TripsMapPanel({
     googleMapsApiKey,
   });
 
+  const logMapState = useCallback((source: string) => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+    const lat = center?.lat();
+    const lng = center?.lng();
+    console.log("[TripsMap]", source, { zoom, center: { lat, lng }, routePoints: routePath.length });
+  }, [routePath.length]);
+
   useEffect(() => {
     if (!mapRef.current) {
       return;
@@ -636,7 +649,8 @@ function TripsMapPanel({
     mapRef.current.setCenter(mapCenter);
     mapRef.current.setZoom(mapZoom);
     mapRef.current.setMapTypeId("satellite");
-  }, [mapCenter, mapZoom, routePath]);
+    logMapState("apply-center-zoom");
+  }, [mapCenter, mapZoom, routePath, logMapState]);
 
   if (loadError) {
     return (
@@ -660,6 +674,16 @@ function TripsMapPanel({
         map.setCenter(mapCenter);
         map.setZoom(mapZoom);
         map.setMapTypeId("satellite");
+        logMapState("on-load");
+      }}
+      onZoomChanged={() => {
+        logMapState("zoom-changed");
+      }}
+      onDragEnd={() => {
+        logMapState("drag-end");
+      }}
+      onIdle={() => {
+        logMapState("idle");
       }}
       onClick={(event) => {
         const lat = event.latLng?.lat();
