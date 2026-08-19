@@ -404,6 +404,64 @@ function formatInUserTimeZone(date: Date) {
   return formatter.format(date);
 }
 
+function buildSparklinePath(values: number[], width = 120, height = 52) {
+  if (values.length === 0) {
+    return "";
+  }
+
+  const safeValues = values.filter((value) => Number.isFinite(value));
+  if (safeValues.length === 0) {
+    return "";
+  }
+
+  if (safeValues.length === 1) {
+    return `M 0 ${height / 2} L ${width} ${height / 2}`;
+  }
+
+  const min = Math.min(...safeValues);
+  const max = Math.max(...safeValues);
+  const range = max - min || 1;
+
+  return safeValues
+    .map((value, index) => {
+      const x = (index / Math.max(safeValues.length - 1, 1)) * width;
+      const normalized = range === 0 ? 0.5 : (value - min) / range;
+      const y = height - normalized * height;
+      return `${index === 0 ? "M" : "L"}${x},${y}`;
+    })
+    .join(" ");
+}
+
+function buildSparklineAreaPath(values: number[], width = 120, height = 52) {
+  const linePath = buildSparklinePath(values, width, height);
+  if (!linePath) {
+    return "";
+  }
+
+  const safeValues = values.filter((value) => Number.isFinite(value));
+  if (safeValues.length <= 1) {
+    return `${linePath} L ${width} ${height} L 0 ${height} Z`;
+  }
+
+  const min = Math.min(...safeValues);
+  const max = Math.max(...safeValues);
+  const range = max - min || 1;
+
+  const points = safeValues.map((value, index) => {
+    const x = (index / Math.max(safeValues.length - 1, 1)) * width;
+    const normalized = range === 0 ? 0.5 : (value - min) / range;
+    const y = height - normalized * height;
+    return { x, y };
+  });
+
+  const firstX = points[0]?.x ?? 0;
+  const lastX = points[points.length - 1]?.x ?? width;
+
+  return `${points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`)
+    .join(" ")} L ${lastX} ${height} L ${firstX} ${height} Z`;
+}
+
 function PositionMap({
   lat,
   lng,
@@ -522,10 +580,26 @@ type ReplayPoint = {
   waterTemp: number;
   battery: number;
   oilPressure: number;
+  odometer: number;
+  useHours: number;
+  mileage: number;
   inTravel: boolean;
   status: number;
   speedSource: string;
 };
+
+function normalizeMonotonicSeries(values: number[]) {
+  const cleaned = values.filter((value) => Number.isFinite(value));
+  let lastValue: number | null = null;
+
+  return cleaned.map((value) => {
+    if (lastValue !== null && value < lastValue) {
+      return lastValue;
+    }
+    lastValue = value;
+    return value;
+  });
+}
 
 function normalizeReplayPoint(record: Record<string, unknown>): ReplayPoint | null {
   const lat = toNumber(record.lastLatitude ?? record.latitude);
@@ -538,6 +612,9 @@ function normalizeReplayPoint(record: Record<string, unknown>): ReplayPoint | nu
   const rawSpeed = toNumber(record.speedObdRaw ?? record.speedObd ?? record.speedGps ?? 0) ?? 0;
   const gpsSpeed = toNumber(record.speedGps ?? 0) ?? 0;
   const speed = speedSource === "CAN" ? rawSpeed : gpsSpeed;
+  const odometer = toNumber(record.odoliter ?? record.odometer ?? record.mileageDevice ?? record.meters ?? record.totalOdometer ?? record.totalDistance ?? 0) ?? 0;
+  const useHours = toNumber(record.useHours ?? record.hoursUsed ?? record.totalHours ?? record.use_hours ?? 0) ?? 0;
+  const mileage = toNumber(record.mileage ?? record.mileageDevice ?? record.meters ?? record.distance ?? 0) ?? 0;
 
   return {
     timestamp: toText(record.date),
@@ -548,6 +625,9 @@ function normalizeReplayPoint(record: Record<string, unknown>): ReplayPoint | nu
     waterTemp: toNumber(record.waterTemp) ?? 0,
     battery: toNumber(record.battery) ?? 0,
     oilPressure: toNumber(record.oilPress) ?? 0,
+    odometer,
+    useHours,
+    mileage,
     inTravel: typeof record.inTravel === "boolean" ? record.inTravel : String(record.inTravel ?? "").toLowerCase() === "true",
     status: toNumber(record.status) ?? 0,
     speedSource,
@@ -583,6 +663,29 @@ async function fetchReplayPoints(vin: string, startTime: string, endTime: string
     : [];
 }
 
+async function fetchTrendHistoryPoints(vin: string) {
+  const params = new URLSearchParams({
+    vin,
+    page: "0",
+    size: "2000",
+  });
+
+  const response = await fetch(`/api/obd-gps-view?${params.toString()}`, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Error ${response.status} en /api/obd-gps-view`);
+  }
+
+  const payload = (await response.json()) as { data?: unknown[] };
+
+  return Array.isArray(payload.data)
+    ? payload.data
+        .filter((item): item is Record<string, unknown> => isRecord(item))
+        .map(normalizeReplayPoint)
+        .filter((item): item is ReplayPoint => item !== null)
+        .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+    : [];
+}
+
 export default function TileModule(props: TileModuleProps) {
   void props;
   const [activeTab, setActiveTab] = useState<TabKey>("info");
@@ -591,6 +694,7 @@ export default function TileModule(props: TileModuleProps) {
   const [error, setError] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<NormalizedVehicle[]>([]);
   const [telemetryByVin, setTelemetryByVin] = useState<Record<string, NormalizedTelemetry | undefined>>({});
+  const [trendHistoryByVin, setTrendHistoryByVin] = useState<Record<string, ReplayPoint[]>>({});
   const [telemetryFetching, setTelemetryFetching] = useState(false);
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
   const [telemetryLastRequestByVin, setTelemetryLastRequestByVin] = useState<Record<string, string>>({});
@@ -720,7 +824,8 @@ export default function TileModule(props: TileModuleProps) {
         const normalized = rows
           .filter((item): item is Record<string, unknown> => isRecord(item))
           .map(normalizeTelemetry)
-          .filter((item): item is NormalizedTelemetry => item !== null);
+          .filter((item): item is NormalizedTelemetry => item !== null)
+          .sort((a, b) => (parseUtcTimestamp(a.timestamp)?.getTime() ?? 0) - (parseUtcTimestamp(b.timestamp)?.getTime() ?? 0));
 
         const selected = normalized.find((item) => item.vin === selectedVin) ?? normalized[0];
 
@@ -760,6 +865,32 @@ export default function TileModule(props: TileModuleProps) {
       return;
     }
 
+    let mounted = true;
+
+    const loadTrendHistory = async () => {
+      try {
+        const rows = await fetchTrendHistoryPoints(selectedVin);
+        if (!mounted) {
+          return;
+        }
+        setTrendHistoryByVin((current) => ({ ...current, [selectedVin]: rows }));
+      } catch {
+        setTrendHistoryByVin((current) => ({ ...current, [selectedVin]: [] }));
+      }
+    };
+
+    void loadTrendHistory();
+
+    return () => {
+      mounted = false;
+    };
+  }, [selectedVin]);
+
+  useEffect(() => {
+    if (!selectedVin) {
+      return;
+    }
+
     if (activeTab !== "telemetry" && activeTab !== "map") {
       return;
     }
@@ -788,7 +919,8 @@ export default function TileModule(props: TileModuleProps) {
         const normalized = rows
           .filter((item): item is Record<string, unknown> => isRecord(item))
           .map(normalizeTelemetry)
-          .filter((item): item is NormalizedTelemetry => item !== null);
+          .filter((item): item is NormalizedTelemetry => item !== null)
+          .sort((a, b) => (parseUtcTimestamp(a.timestamp)?.getTime() ?? 0) - (parseUtcTimestamp(b.timestamp)?.getTime() ?? 0));
 
         const selected = normalized.find((item) => item.vin === selectedVin) ?? normalized[0];
 
@@ -833,8 +965,84 @@ export default function TileModule(props: TileModuleProps) {
   );
 
   const selectedTelemetry = useMemo(() => telemetryByVin[selectedVin] ?? null, [telemetryByVin, selectedVin]);
+  const trendHistory = useMemo(() => trendHistoryByVin[selectedVin] ?? [], [selectedVin, trendHistoryByVin]);
   const telemetryLoading = telemetryFetching && !selectedTelemetry;
   const selectedTelemetryLastRequest = telemetryLastRequestByVin[selectedVin] ?? "";
+
+  const telemetryTrendCards = useMemo(() => {
+    const validTimestamps = trendHistory
+      .map((item) => parseUtcTimestamp(item.timestamp))
+      .filter((value): value is Date => value instanceof Date && !Number.isNaN(value.getTime()));
+
+    const newestTimestamp = validTimestamps.reduce((max, current) => {
+      return current.getTime() > max.getTime() ? current : max;
+    }, validTimestamps[0] ?? new Date(0));
+
+    const sevenDaysAgo = newestTimestamp.getTime() - 7 * 24 * 60 * 60 * 1000;
+    const recent = trendHistory.filter((item) => {
+      const timestamp = parseUtcTimestamp(item.timestamp);
+      if (!timestamp) {
+        return true;
+      }
+      return timestamp.getTime() >= sevenDaysAgo;
+    });
+
+    const seriesFor = (field: "speed" | "rpm" | "waterTemp" | "battery" | "oilPressure") =>
+      recent
+        .map((item) => item[field])
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+    const cumulativeSeriesFor = (field: "odometer" | "useHours" | "mileage") =>
+      normalizeMonotonicSeries(
+        recent
+          .map((item) => item[field])
+          .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+      );
+
+    const fallbackSeries = [0];
+
+    return [
+      { key: "mileage", label: "Mileage", value: selectedTelemetry?.mileage ?? "-", icon: "/icons/odometro.png", series: cumulativeSeriesFor("mileage").length ? cumulativeSeriesFor("mileage") : fallbackSeries, color: "#475569", withTrend: true },
+      { key: "useHours", label: "Use Hours", value: selectedTelemetry?.usedHours ?? "-", icon: "/icons/ultima_conexion.png", series: cumulativeSeriesFor("useHours").length ? cumulativeSeriesFor("useHours") : fallbackSeries, color: "#f59e0b", withTrend: true },
+      { key: "odometer", label: "OdoLiter", value: selectedTelemetry?.odometer ?? "-", icon: "/icons/tanque_nafta.png", series: cumulativeSeriesFor("odometer").length ? cumulativeSeriesFor("odometer") : fallbackSeries, color: "#06b6d4", withTrend: true },
+      { key: "lastConnection", label: "Last Connection", value: formatTimestamp(selectedTelemetry?.lastConnection ?? ""), icon: "/icons/ultima_conexion.png", series: [], color: "#8b5cf6", withTrend: false },
+      { key: "speed", label: "Speed", value: selectedTelemetry?.speed ?? "-", icon: "/icons/presion_1.png", series: seriesFor("speed").length ? seriesFor("speed") : fallbackSeries, color: "#2563eb", withTrend: true },
+      { key: "rpm", label: "RPM", value: selectedTelemetry?.rpm ?? "-", icon: "/icons/max_rpm.png", series: seriesFor("rpm").length ? seriesFor("rpm") : fallbackSeries, color: "#0ea5e9", withTrend: true },
+      { key: "failures", label: "Failures", value: selectedTelemetry?.failures ?? "-", icon: "/icons/check.png", series: [], color: "#ef4444", withTrend: false },
+      { key: "battery", label: "Battery", value: selectedTelemetry?.battery ?? "-", icon: "/icons/bateria.png", series: seriesFor("battery").length ? seriesFor("battery") : fallbackSeries, color: "#10b981", withTrend: true },
+      { key: "waterTemp", label: "Water Temp", value: selectedTelemetry?.waterTemp ?? "-", icon: "/icons/temp_agua.png", series: seriesFor("waterTemp").length ? seriesFor("waterTemp") : fallbackSeries, color: "#fb7185", withTrend: true },
+      { key: "oilPressure", label: "Oil Pressure", value: selectedTelemetry?.oilPressure ?? "-", icon: "/icons/presion_1.png", series: seriesFor("oilPressure").length ? seriesFor("oilPressure") : fallbackSeries, color: "#6366f1", withTrend: true },
+      { key: "inletPressure", label: "Inlet Pressure", value: selectedTelemetry?.inletPressure ?? "-", icon: "/icons/presion_admision.png", series: seriesFor("oilPressure").length ? seriesFor("oilPressure") : fallbackSeries, color: "#d946ef", withTrend: true },
+      { key: "maxTemp", label: "Max Temp", value: selectedTelemetry?.temp ?? "-", icon: "/icons/temp_agua.png", series: seriesFor("waterTemp").length ? seriesFor("waterTemp") : fallbackSeries, color: "#f97316", withTrend: true },
+    ];
+  }, [selectedTelemetry, trendHistory]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" || !trendHistory.length) {
+      return;
+    }
+
+    const debugRows = telemetryTrendCards.map((card) => {
+      const values = card.series;
+      const min = values.length ? Math.min(...values) : null;
+      const max = values.length ? Math.max(...values) : null;
+      return {
+        label: card.label,
+        value: card.value,
+        samples: values.length,
+        min,
+        max,
+        first: values[0],
+        last: values[values.length - 1],
+        series: values,
+      };
+    });
+
+    console.log("[telemetry-trend-debug]", {
+      vin: selectedVin,
+      rows: debugRows,
+    });
+  }, [selectedVin, telemetryTrendCards, trendHistory.length]);
 
   const handleExecuteReplay = async () => {
     if (!selectedVin) {
@@ -1002,7 +1210,7 @@ export default function TileModule(props: TileModuleProps) {
             </div>
           </aside>
 
-          <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-3 md:p-4">
+          <section className="flex h-full min-h-0 flex-col overflow-visible rounded-xl border border-slate-200 bg-white p-3 md:p-4">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
               <div>
                 {/* <h2 className="text-lg font-semibold text-slate-900">
@@ -1042,7 +1250,7 @@ export default function TileModule(props: TileModuleProps) {
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-hidden pr-1">
+            <div className="min-h-0 flex-1 overflow-visible pr-1">
             {activeTab === "info" && (
               <div className="grid h-full grid-cols-1 gap-3 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -1122,28 +1330,52 @@ export default function TileModule(props: TileModuleProps) {
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-                    {[
-                      { label: "Mileage", value: selectedTelemetry?.mileage, icon: "/icons/odometro.png" },
-                      { label: "Use Hours", value: selectedTelemetry?.usedHours, icon: "/icons/ultima_conexion.png" },
-                      { label: "OdoLiter", value: selectedTelemetry?.odometer, icon: "/icons/tanque_nafta.png" },
-                      { label: "Last Connection", value: formatTimestamp(selectedTelemetry?.lastConnection ?? ""), icon: "/icons/ultima_conexion.png" },
-                      { label: "Speed", value: selectedTelemetry?.speed, icon: "/icons/presion_1.png" },
-                      { label: "RPM", value: selectedTelemetry?.rpm, icon: "/icons/max_rpm.png" },
-                      { label: "Failures", value: selectedTelemetry?.failures, icon: "/icons/check.png" },
-                      { label: "Battery", value: selectedTelemetry?.battery, icon: "/icons/bateria.png" },
-                      { label: "Water Temp", value: selectedTelemetry?.waterTemp, icon: "/icons/temp_agua.png" },
-                      { label: "Oil Pressure", value: selectedTelemetry?.oilPressure, icon: "/icons/presion_1.png" },
-                      { label: "Inlet Pressure", value: selectedTelemetry?.inletPressure, icon: "/icons/presion_admision.png" },
-                      { label: "Max Temp", value: selectedTelemetry?.temp, icon: "/icons/temp_agua.png" },
-                    ].map((item) => (
-                      <article key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <div className="flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-slate-500">
-                          <Image src={item.icon} alt={item.label} width={14} height={14} className="h-3.5 w-3.5 object-contain" />
-                          <span>{item.label}</span>
-                        </div>
-                        <p className="mt-2 text-lg font-semibold text-slate-900">{item.value ?? "-"}</p>
-                      </article>
-                    ))}
+                    {telemetryTrendCards.map((item) => {
+                      const linePath = item.withTrend ? buildSparklinePath(item.series) : "";
+                      const areaPath = item.withTrend ? buildSparklineAreaPath(item.series) : "";
+                      const gradientId = `spark-${item.key}`;
+
+                      const isNoTrendCard = !item.withTrend;
+
+                      return (
+                        <article key={item.key} className="min-h-[124px] rounded-xl border border-slate-200 bg-[#f5f7fb] p-2.5 shadow-sm">
+                          <div className="flex h-full flex-col justify-between gap-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white shadow-sm" style={{ color: item.color }}>
+                                  <Image src={item.icon} alt={item.label} width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                                </div>
+                                <div className="min-w-0 text-[9px] font-medium uppercase tracking-[0.08em] text-slate-500">{item.label}</div>
+                              </div>
+                            </div>
+
+                            <div className={`flex min-h-[38px] items-end ${isNoTrendCard ? "justify-center" : "justify-between"} gap-2`}>
+                              <p
+                                className={
+                                  isNoTrendCard
+                                    ? "max-w-full text-center text-sm font-bold leading-tight tracking-[-0.03em] text-slate-800"
+                                    : "max-w-[120px] truncate text-base font-bold leading-none tracking-[-0.04em] text-slate-800"
+                                }
+                              >
+                                {item.value ?? "-"}
+                              </p>
+                              {item.withTrend ? (
+                                <svg viewBox="0 0 120 52" className="h-9 w-20 shrink-0 overflow-visible">
+                                  <defs>
+                                    <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+                                      <stop offset="0%" stopColor={item.color} stopOpacity="0.28" />
+                                      <stop offset="100%" stopColor={item.color} stopOpacity="0.04" />
+                                    </linearGradient>
+                                  </defs>
+                                  <path d={areaPath} fill={`url(#${gradientId})`} />
+                                  <path d={linePath} fill="none" stroke={item.color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              ) : null}
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
                 </div>
               )
@@ -1275,7 +1507,7 @@ export default function TileModule(props: TileModuleProps) {
                   </div>
                 )}
 
-                <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                <div className="relative overflow-visible rounded-lg border border-slate-200 bg-slate-50">
                   {routeLoading ? (
                     <div className="flex h-[300px] items-center justify-center text-sm text-slate-600">Cargando recorrido...</div>
                   ) : routeError ? (
