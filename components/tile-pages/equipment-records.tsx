@@ -1067,7 +1067,6 @@ export default function TileModule(props: TileModuleProps) {
                     <p><span className="font-medium text-slate-700">Lic Plate:</span> {selectedVehicle?.licPlate ?? "-"}</p>
                     <p><span className="font-medium text-slate-700">VIN:</span> {selectedVehicle?.vin ?? "-"}</p>
                     <p><span className="font-medium text-slate-700">Device Id:</span> {selectedVehicle?.deviceId ?? "-"}</p>
-                    <p><span className="font-medium text-slate-700">Colour:</span> {selectedVehicle?.color ?? "-"}</p>
                     <p className="sm:col-span-2"><span className="font-medium text-slate-700">Vehicle type:</span> {selectedVehicle?.vehicleType ?? "-"}</p>
                   </div>
                 </div>
