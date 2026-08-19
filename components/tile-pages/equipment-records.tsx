@@ -449,6 +449,7 @@ function PositionMap({
       onClick={() => setShowInfo(false)}
       options={{
         mapTypeControl: true,
+        mapTypeId: "satellite",
         streetViewControl: false,
         fullscreenControl: true,
       }}
