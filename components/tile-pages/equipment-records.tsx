@@ -1,9 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import TripsTab from "@/components/tile-pages/trips-tab";
-import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, InfoWindowF, MarkerF, PolylineF, useJsApiLoader } from "@react-google-maps/api";
 
 type TileModuleProps = {
   title: string;
@@ -326,6 +327,30 @@ function formatTimestamp(value: string) {
   return formatInUserTimeZone(date);
 }
 
+function toDateTimeLocalValue(value: string) {
+  const date = parseUtcTimestamp(value);
+  if (!date) {
+    return "";
+  }
+
+  const pad = (num: number) => String(num).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function toApiIso(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toISOString();
+}
+
 function parseUtcTimestamp(value: string) {
   const raw = value.trim();
   if (!raw) {
@@ -392,13 +417,13 @@ function PositionMap({
 }) {
   const [showInfo, setShowInfo] = useState(false);
   const { isLoaded, loadError } = useJsApiLoader({
-    id: "position-map",
+    id: "equipment-records-map",
     googleMapsApiKey,
   });
 
   if (!googleMapsApiKey) {
     return (
-      <div className="flex h-[520px] items-center justify-center p-4 text-center text-sm text-slate-600">
+      <div className="flex h-[300px] items-center justify-center p-4 text-center text-sm text-slate-600">
         No se encontro Google Maps API key. Configura NEXT_PUBLIC_GOOGLE_MAPS_API_KEY o /api/public-config.
       </div>
     );
@@ -406,19 +431,19 @@ function PositionMap({
 
   if (loadError) {
     return (
-      <div className="flex h-[520px] items-center justify-center p-4 text-center text-sm text-rose-700">
+      <div className="flex h-[300px] items-center justify-center p-4 text-center text-sm text-rose-700">
         No se pudo cargar Google Maps.
       </div>
     );
   }
 
   if (!isLoaded) {
-    return <div className="flex h-[520px] items-center justify-center text-sm text-slate-600">Cargando mapa...</div>;
+    return <div className="flex h-[300px] items-center justify-center text-sm text-slate-600">Cargando mapa...</div>;
   }
 
   return (
     <GoogleMap
-      mapContainerStyle={{ width: "100%", height: "520px" }}
+      mapContainerStyle={{ width: "100%", height: "420px" }}
       center={{ lat, lng }}
       zoom={16}
       onClick={() => setShowInfo(false)}
@@ -487,6 +512,76 @@ async function fetchTelemetryByVin(vin: string) {
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
+type ReplayPoint = {
+  timestamp: string;
+  lat: number;
+  lng: number;
+  speed: number;
+  rpm: number;
+  waterTemp: number;
+  battery: number;
+  oilPressure: number;
+  inTravel: boolean;
+  status: number;
+  speedSource: string;
+};
+
+function normalizeReplayPoint(record: Record<string, unknown>): ReplayPoint | null {
+  const lat = toNumber(record.lastLatitude ?? record.latitude);
+  const lng = toNumber(record.lastLongitude ?? record.longitude);
+  if (lat === undefined || lng === undefined) {
+    return null;
+  }
+
+  const speedSource = String(record.speedFrom ?? "GPS").trim().toUpperCase() || "GPS";
+  const rawSpeed = toNumber(record.speedObdRaw ?? record.speedObd ?? record.speedGps ?? 0) ?? 0;
+  const gpsSpeed = toNumber(record.speedGps ?? 0) ?? 0;
+  const speed = speedSource === "CAN" ? rawSpeed : gpsSpeed;
+
+  return {
+    timestamp: toText(record.date),
+    lat,
+    lng,
+    speed,
+    rpm: toNumber(record.rpm) ?? 0,
+    waterTemp: toNumber(record.waterTemp) ?? 0,
+    battery: toNumber(record.battery) ?? 0,
+    oilPressure: toNumber(record.oilPress) ?? 0,
+    inTravel: typeof record.inTravel === "boolean" ? record.inTravel : String(record.inTravel ?? "").toLowerCase() === "true",
+    status: toNumber(record.status) ?? 0,
+    speedSource,
+  };
+}
+
+async function fetchReplayPoints(vin: string, startTime: string, endTime: string) {
+  const params = new URLSearchParams({
+    vin,
+    page: "0",
+    size: "20000",
+  });
+
+  if (startTime) {
+    params.set("startTime", startTime);
+  }
+  if (endTime) {
+    params.set("endTime", endTime);
+  }
+
+  const response = await fetch(`/api/obd-gps-view?${params.toString()}`, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Error ${response.status} en /api/obd-gps-view`);
+  }
+
+  const payload = (await response.json()) as { data?: unknown[] };
+  return Array.isArray(payload.data)
+    ? payload.data
+        .filter((item): item is Record<string, unknown> => isRecord(item))
+        .map(normalizeReplayPoint)
+        .filter((item): item is ReplayPoint => item !== null)
+        .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+    : [];
+}
+
 export default function TileModule(props: TileModuleProps) {
   void props;
   const [activeTab, setActiveTab] = useState<TabKey>("info");
@@ -500,6 +595,19 @@ export default function TileModule(props: TileModuleProps) {
   const [telemetryLastRequestByVin, setTelemetryLastRequestByVin] = useState<Record<string, string>>({});
   const [selectedVin, setSelectedVin] = useState<string>("");
   const [runtimeMapsApiKey, setRuntimeMapsApiKey] = useState("");
+  const [mapFrom, setMapFrom] = useState(() => {
+    const now = new Date();
+    const before = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    return toDateTimeLocalValue(before.toISOString());
+  });
+  const [mapTo, setMapTo] = useState(() => toDateTimeLocalValue(new Date().toISOString()));
+  const [routePoints, setRoutePoints] = useState<ReplayPoint[]>([]);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [isReplayPlaying, setIsReplayPlaying] = useState(false);
+  const [hasStartedReplay, setHasStartedReplay] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(1);
   const telemetryInFlightRef = useRef(false);
 
   const buildMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
@@ -727,6 +835,54 @@ export default function TileModule(props: TileModuleProps) {
   const telemetryLoading = telemetryFetching && !selectedTelemetry;
   const selectedTelemetryLastRequest = telemetryLastRequestByVin[selectedVin] ?? "";
 
+  const handleExecuteReplay = async () => {
+    if (!selectedVin) {
+      return;
+    }
+
+    setRouteLoading(true);
+    setRouteError(null);
+    setHasStartedReplay(false);
+    setIsReplayPlaying(false);
+    setReplayIndex(0);
+    setRoutePoints([]);
+
+    try {
+      const startTime = toApiIso(mapFrom);
+      const endTime = toApiIso(mapTo);
+      const rows = await fetchReplayPoints(selectedVin, startTime, endTime);
+      setRoutePoints(rows);
+      setReplayIndex(0);
+    } catch (loadError) {
+      setRouteError(loadError instanceof Error ? loadError.message : "Error cargando recorrido");
+      setRoutePoints([]);
+    } finally {
+      setRouteLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isReplayPlaying || routePoints.length <= 1) {
+      return;
+    }
+
+    const intervalMs = Math.max(120, 1000 / replaySpeed);
+    const intervalId = window.setInterval(() => {
+      setReplayIndex((current) => {
+        const nextIndex = current + 1;
+        if (nextIndex >= routePoints.length - 1) {
+          setIsReplayPlaying(false);
+          return routePoints.length - 1;
+        }
+        return nextIndex;
+      });
+    }, intervalMs);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isReplayPlaying, replaySpeed, routePoints]);
+
   const visibleVehicles = useMemo(() => {
     if (!search.trim()) {
       return vehicles;
@@ -762,8 +918,22 @@ export default function TileModule(props: TileModuleProps) {
     };
   }, [selectedTelemetry]);
 
+  const visibleRoutePath = useMemo(() => {
+    if (!routePoints.length) {
+      return [] as Array<{ lat: number; lng: number }>;
+    }
+
+    if (!hasStartedReplay) {
+      return routePoints.map((point) => ({ lat: point.lat, lng: point.lng }));
+    }
+
+    return routePoints.slice(0, replayIndex + 1).map((point) => ({ lat: point.lat, lng: point.lng }));
+  }, [hasStartedReplay, replayIndex, routePoints]);
+  const activeReplayPoint = routePoints[replayIndex] ?? null;
+  const isReplayVisible = routePoints.length > 0;
+
   return (
-    <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl border border-[color:var(--tile-border)] bg-[color:var(--surface)] p-2 shadow-sm md:p-3">
+    <div className="mx-auto flex h-[calc(100vh-20px)] w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl border border-[color:var(--tile-border)] bg-[color:var(--surface)] p-2 shadow-sm md:p-3">
       <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5">
         <h1 className="text-sm font-semibold uppercase tracking-[0.08em] text-slate-700">Equipment Records</h1>
         <Link
@@ -831,7 +1001,7 @@ export default function TileModule(props: TileModuleProps) {
             </div>
           </aside>
 
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-3 md:p-4">
+          <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-3 md:p-4">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
               <div>
                 {/* <h2 className="text-lg font-semibold text-slate-900">
@@ -854,7 +1024,7 @@ export default function TileModule(props: TileModuleProps) {
                   { key: "info" as const, label: "Informacion" },
                   { key: "telemetry" as const, label: "Telemetria" },
                   { key: "trips" as const, label: "Viajes" },
-                  { key: "map" as const, label: "Mapa" },
+                  { key: "map" as const, label: "Replay" },
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -871,11 +1041,11 @@ export default function TileModule(props: TileModuleProps) {
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 overflow-hidden pr-1">
             {activeTab === "info" && (
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <div className="grid h-full grid-cols-1 gap-3 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="mb-3 flex h-56 items-center justify-center rounded bg-white xl:h-64">
+                  <div className="mb-3 flex h-44 items-center justify-center overflow-hidden rounded bg-white xl:h-56">
                     {selectedVehicle?.imageUrl ? (
                       <div
                         role="img"
@@ -889,7 +1059,7 @@ export default function TileModule(props: TileModuleProps) {
                   </div>
 
                   <h3 className="mb-2 text-base font-semibold text-slate-800">Vehicle</h3>
-                  <div className="space-y-1 text-sm">
+                  <div className="grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
                     <p><span className="font-medium text-slate-700">Make:</span> {selectedVehicle?.make ?? "-"}</p>
                     <p><span className="font-medium text-slate-700">Model:</span> {selectedVehicle?.model ?? "-"}</p>
                     <p><span className="font-medium text-slate-700">Submodel:</span> {selectedVehicle?.submodel ?? "-"}</p>
@@ -898,22 +1068,44 @@ export default function TileModule(props: TileModuleProps) {
                     <p><span className="font-medium text-slate-700">VIN:</span> {selectedVehicle?.vin ?? "-"}</p>
                     <p><span className="font-medium text-slate-700">Device Id:</span> {selectedVehicle?.deviceId ?? "-"}</p>
                     <p><span className="font-medium text-slate-700">Colour:</span> {selectedVehicle?.color ?? "-"}</p>
-                    <p><span className="font-medium text-slate-700">Vehicle type:</span> {selectedVehicle?.vehicleType ?? "-"}</p>
+                    <p className="sm:col-span-2"><span className="font-medium text-slate-700">Vehicle type:</span> {selectedVehicle?.vehicleType ?? "-"}</p>
                   </div>
                 </div>
 
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <h3 className="mb-2 text-base font-semibold text-slate-800">Car Specs</h3>
-                  <div className="space-y-1 text-sm">
-                    <p><span className="font-medium text-slate-700">Sector:</span> {selectedVehicle?.sector ?? "-"}</p>
-                    <p><span className="font-medium text-slate-700">Engine Type:</span> Diesel</p>
-                    <p><span className="font-medium text-slate-700">Engine Size:</span> -</p>
-                    <p><span className="font-medium text-slate-700">HorsePower:</span> -</p>
-                    <p><span className="font-medium text-slate-700">Torque:</span> -</p>
-                    <p><span className="font-medium text-slate-700">Fuel Tank:</span> -</p>
-                    <p><span className="font-medium text-slate-700">Avg. Consumption:</span> -</p>
-                    <p><span className="font-medium text-slate-700">City Consumption:</span> -</p>
-                    <p><span className="font-medium text-slate-700">Highway Consumption:</span> -</p>
+                  <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                    {selectedPosition ? (
+                      <PositionMap
+                        key={`${selectedPosition.lat}-${selectedPosition.lng}-${selectedPosition.timestamp}`}
+                        lat={selectedPosition.lat}
+                        lng={selectedPosition.lng}
+                        timestamp={selectedPosition.timestamp}
+                        googleMapsApiKey={googleMapsApiKey}
+                      />
+                    ) : (
+                      <div className="flex h-[260px] items-center justify-center text-sm text-slate-500">
+                        {telemetryLoading ? "Cargando ubicacion..." : "No hay coordenadas para el VIN seleccionado."}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm md:grid-cols-3">
+                    {[
+                      { label: "RPM", value: selectedTelemetry?.rpm ?? "-", icon: "/icons/max_rpm.png" },
+                      { label: "Velocidad", value: selectedTelemetry?.speed ?? "-", icon: "/icons/presion_1.png" },
+                      { label: "Temp", value: selectedTelemetry?.temp ?? "-", icon: "/icons/temp_agua.png" },
+                      { label: "Bateria", value: selectedTelemetry?.battery ?? "-", icon: "/icons/bateria.png" },
+                      { label: "Ultima conex.", value: formatTimestamp(selectedTelemetry?.lastConnection ?? ""), icon: "/icons/ultima_conexion.png" },
+                      { label: "Use Hours", value: selectedTelemetry?.usedHours ?? "-", icon: "/icons/ultima_conexion.png" },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded border border-slate-200 bg-white px-2 py-2">
+                        <div className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                          <Image src={item.icon} alt={item.label} width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                          <span>{item.label}</span>
+                        </div>
+                        <span className="mt-1 block font-semibold text-slate-900">{item.value}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -931,21 +1123,24 @@ export default function TileModule(props: TileModuleProps) {
                   )}
                   <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
                     {[
-                      { label: "Mileage", value: selectedTelemetry?.mileage },
-                      { label: "Use Hours", value: selectedTelemetry?.usedHours },
-                      { label: "Odometer", value: selectedTelemetry?.odometer },
-                      { label: "Last Connection", value: formatTimestamp(selectedTelemetry?.lastConnection ?? "") },
-                      { label: "Speed", value: selectedTelemetry?.speed },
-                      { label: "RPM", value: selectedTelemetry?.rpm },
-                      { label: "Failures", value: selectedTelemetry?.failures },
-                      { label: "Battery", value: selectedTelemetry?.battery },
-                      { label: "Water Temp", value: selectedTelemetry?.waterTemp },
-                      { label: "Oil Pressure", value: selectedTelemetry?.oilPressure },
-                      { label: "Inlet Pressure", value: selectedTelemetry?.inletPressure },
-                      { label: "Max Temp", value: selectedTelemetry?.temp },
+                      { label: "Mileage", value: selectedTelemetry?.mileage, icon: "/icons/odometro.png" },
+                      { label: "Use Hours", value: selectedTelemetry?.usedHours, icon: "/icons/ultima_conexion.png" },
+                      { label: "OdoLiter", value: selectedTelemetry?.odometer, icon: "/icons/tanque_nafta.png" },
+                      { label: "Last Connection", value: formatTimestamp(selectedTelemetry?.lastConnection ?? ""), icon: "/icons/ultima_conexion.png" },
+                      { label: "Speed", value: selectedTelemetry?.speed, icon: "/icons/presion_1.png" },
+                      { label: "RPM", value: selectedTelemetry?.rpm, icon: "/icons/max_rpm.png" },
+                      { label: "Failures", value: selectedTelemetry?.failures, icon: "/icons/check.png" },
+                      { label: "Battery", value: selectedTelemetry?.battery, icon: "/icons/bateria.png" },
+                      { label: "Water Temp", value: selectedTelemetry?.waterTemp, icon: "/icons/temp_agua.png" },
+                      { label: "Oil Pressure", value: selectedTelemetry?.oilPressure, icon: "/icons/presion_1.png" },
+                      { label: "Inlet Pressure", value: selectedTelemetry?.inletPressure, icon: "/icons/presion_admision.png" },
+                      { label: "Max Temp", value: selectedTelemetry?.temp, icon: "/icons/temp_agua.png" },
                     ].map((item) => (
                       <article key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <p className="text-xs uppercase tracking-[0.08em] text-slate-500">{item.label}</p>
+                        <div className="flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-slate-500">
+                          <Image src={item.icon} alt={item.label} width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                          <span>{item.label}</span>
+                        </div>
                         <p className="mt-2 text-lg font-semibold text-slate-900">{item.value ?? "-"}</p>
                       </article>
                     ))}
@@ -959,36 +1154,212 @@ export default function TileModule(props: TileModuleProps) {
             )}
 
             {activeTab === "map" && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                    <span className="font-medium text-slate-700">Speed:</span> {selectedTelemetry?.speed ?? "-"}
-                  </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                    <span className="font-medium text-slate-700">Temp:</span> {selectedTelemetry?.temp ?? "-"}
-                  </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                    <span className="font-medium text-slate-700">RPM:</span> {selectedTelemetry?.rpm ?? "-"}
+              <div className="flex h-full flex-col gap-3">
+                <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:flex-row md:items-end">
+                  <label className="flex flex-1 flex-col gap-1 text-[11px] font-medium text-slate-600">
+                    Desde
+                    <input
+                      type="datetime-local"
+                      value={mapFrom}
+                      onChange={(event) => setMapFrom(event.target.value)}
+                      className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="flex flex-1 flex-col gap-1 text-[11px] font-medium text-slate-600">
+                    Hasta
+                    <input
+                      type="datetime-local"
+                      value={mapTo}
+                      onChange={(event) => setMapTo(event.target.value)}
+                      className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleExecuteReplay();
+                        setHasStartedReplay(false);
+                      }}
+                      className="rounded border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
+                    >
+                      Ejecutar
+                    </button>
+                    <div className="flex items-center gap-1 rounded border border-slate-200 bg-white p-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsReplayPlaying(false);
+                          setHasStartedReplay(true);
+                          setReplayIndex((current) => Math.max(0, current - 1));
+                        }}
+                        className="h-7 w-7 rounded bg-slate-50 text-base text-slate-700"
+                        title="Anterior"
+                      >
+                        ◀
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!routePoints.length) {
+                            return;
+                          }
+                          if (isReplayPlaying) {
+                            setIsReplayPlaying(false);
+                            return;
+                          }
+                          setHasStartedReplay(true);
+                          setReplayIndex((current) => Math.max(0, current));
+                          setIsReplayPlaying(true);
+                        }}
+                        className="h-7 w-7 rounded bg-slate-50 text-base text-slate-700"
+                        title={isReplayPlaying ? "Pausar" : "Reproducir"}
+                      >
+                        {isReplayPlaying ? "❚❚" : "▶"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsReplayPlaying(false);
+                          setHasStartedReplay(true);
+                          setReplayIndex((current) => Math.min(routePoints.length - 1, current + 1));
+                        }}
+                        className="h-7 w-7 rounded bg-slate-50 text-base text-slate-700"
+                        title="Siguiente"
+                      >
+                        ▶
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                  {selectedPosition ? (
-                    <PositionMap
-                      key={`${selectedPosition.lat}-${selectedPosition.lng}-${selectedPosition.timestamp}`}
-                      lat={selectedPosition.lat}
-                      lng={selectedPosition.lng}
-                      timestamp={selectedPosition.timestamp}
-                      googleMapsApiKey={googleMapsApiKey}
+                {routePoints.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                    <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-slate-600">
+                      <span>Recorrido</span>
+                      <div className="flex items-center gap-1 rounded border border-slate-200 bg-white p-0.5">
+                        {[1, 2, 4].map((speedOption) => (
+                          <button
+                            key={speedOption}
+                            type="button"
+                            onClick={() => setReplaySpeed(speedOption)}
+                            className={`min-w-[34px] rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                              replaySpeed === speedOption
+                                ? "bg-blue-600 text-white"
+                                : "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {speedOption}x
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(routePoints.length - 1, 0)}
+                      step={1}
+                      value={replayIndex}
+                      onChange={(event) => {
+                        const nextIndex = Number(event.target.value);
+                        setHasStartedReplay(true);
+                        setIsReplayPlaying(false);
+                        setReplayIndex(nextIndex);
+                      }}
+                      className="h-2 w-full accent-blue-600"
                     />
+                    <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500">
+                      <span>{formatTimestamp(routePoints[0]?.timestamp ?? "")}</span>
+                      <span>{formatTimestamp(routePoints[Math.max(routePoints.length - 1, 0)]?.timestamp ?? "")}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                  {routeLoading ? (
+                    <div className="flex h-[300px] items-center justify-center text-sm text-slate-600">Cargando recorrido...</div>
+                  ) : routeError ? (
+                    <div className="flex h-[300px] items-center justify-center text-sm text-rose-700">{routeError}</div>
+                  ) : routePoints.length === 0 ? (
+                    <div className="flex h-[300px] items-center justify-center text-sm text-slate-500">
+                      No hay puntos para este rango de fechas.
+                    </div>
                   ) : (
-                    <div className="flex h-[520px] items-center justify-center text-sm text-slate-500">
-                      {telemetryLoading ? "Cargando ubicacion..." : "No hay coordenadas para el VIN seleccionado."}
+                    <GoogleMap
+                      mapContainerStyle={{ width: "100%", height: "480px" }}
+                      center={{
+                        lat: routePoints[Math.max(0, replayIndex)]?.lat ?? selectedPosition?.lat ?? -34.6,
+                        lng: routePoints[Math.max(0, replayIndex)]?.lng ?? selectedPosition?.lng ?? -58.4,
+                      }}
+                      zoom={15}
+                      onClick={() => setIsReplayPlaying(false)}
+                      options={{
+                        mapTypeControl: true,
+                        mapTypeId: "satellite",
+                        streetViewControl: false,
+                        fullscreenControl: true,
+                      }}
+                    >
+                      {isReplayVisible && (
+                        <PolylineF
+                          path={visibleRoutePath}
+                          options={{
+                            strokeColor: "#2563eb",
+                            strokeWeight: 4,
+                          }}
+                        />
+                      )}
+
+                      {!isReplayPlaying && routePoints.length > 0 && (
+                        <>
+                          <MarkerF
+                            position={{ lat: routePoints[0].lat, lng: routePoints[0].lng }}
+                            icon={{
+                              url: "/icons/startPoint.png",
+                              scaledSize: new google.maps.Size(14, 14),
+                              anchor: new google.maps.Point(7, 7),
+                            }}
+                          />
+                          <MarkerF
+                            position={{ lat: routePoints[routePoints.length - 1].lat, lng: routePoints[routePoints.length - 1].lng }}
+                            icon={{
+                              url: "/icons/llegada.png",
+                              scaledSize: new google.maps.Size(28, 28),
+                              anchor: new google.maps.Point(14, 14),
+                            }}
+                          />
+                        </>
+                      )}
+
+                      {activeReplayPoint && (
+                        <MarkerF position={{ lat: activeReplayPoint.lat, lng: activeReplayPoint.lng }} />
+                      )}
+                    </GoogleMap>
+                  )}
+
+                  {activeReplayPoint && (
+                    <div className="pointer-events-none absolute right-2 top-2 z-10 w-[180px] rounded-lg border border-slate-200 bg-white/95 p-2 shadow-lg backdrop-blur-sm">
+                      <div className="mb-1 border-b border-slate-100 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        Punto activo
+                      </div>
+                      <div className="space-y-1 text-[9px] text-slate-700">
+                        <p><span className="font-semibold text-slate-800">Fecha:</span> {formatTimestamp(activeReplayPoint.timestamp)}</p>
+                        <p><span className="font-semibold text-slate-800">RPM:</span> {activeReplayPoint.rpm.toFixed(2)}</p>
+                        <p><span className="font-semibold text-slate-800">Temp:</span> {activeReplayPoint.waterTemp.toFixed(2)}</p>
+                        <p><span className="font-semibold text-slate-800">Bateria:</span> {activeReplayPoint.battery.toFixed(2)}</p>
+                        <p><span className="font-semibold text-slate-800">Aceite:</span> {activeReplayPoint.oilPressure.toFixed(2)}</p>
+                        <p><span className="font-semibold text-slate-800">Estado:</span> {activeReplayPoint.inTravel ? "En viaje" : "Detenido"}</p>
+                      </div>
                     </div>
                   )}
                 </div>
-                <p className="text-xs text-slate-500">Timestamp: {formatTimestamp(selectedTelemetry?.timestamp ?? "")}</p>
-                {telemetryError && <p className="text-xs text-rose-700">{telemetryError}</p>}
+
+                {routePoints.length > 0 && (
+                  <p className="text-xs text-slate-500">
+                    Recorrido: {formatTimestamp(routePoints[0]?.timestamp ?? "")} - {formatTimestamp(routePoints[routePoints.length - 1]?.timestamp ?? "")}
+                  </p>
+                )}
+                {routeError && <p className="text-xs text-rose-700">{routeError}</p>}
               </div>
             )}
             </div>

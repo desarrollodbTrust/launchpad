@@ -516,7 +516,7 @@ function InteractiveChart({
                     stroke="#16a34a"
                     strokeWidth={2}
                     dot={false}
-                    activeDot={{ r: 7 }}
+                    activeDot={{ r: 6, fill: "#16a34a", stroke: "#ffffff", strokeWidth: 1 }}
                   />
                 )}
                 {hasCanSeries && (
@@ -526,27 +526,8 @@ function InteractiveChart({
                     name="Speed CAN"
                     stroke="#f59e0b"
                     strokeWidth={2}
-                    dot={(props) => {
-                      const pointIndex = props.index;
-                      const isSelected = pointIndex === selectedIndex;
-                      return (
-                        <circle
-                          cx={props.cx}
-                          cy={props.cy}
-                          r={isSelected ? 6 : 3}
-                          fill={isSelected ? "#dc2626" : "#f59e0b"}
-                          stroke="#ffffff"
-                          strokeWidth={isSelected ? 2 : 1}
-                          style={{ cursor: "pointer" }}
-                          onClick={() => {
-                            if (typeof pointIndex === "number") {
-                              onSelect(pointIndex);
-                            }
-                          }}
-                        />
-                      );
-                    }}
-                    activeDot={{ r: 7 }}
+                    dot={false}
+                    activeDot={{ r: 6, fill: "#f59e0b", stroke: "#ffffff", strokeWidth: 1 }}
                   />
                 )}
               </>
@@ -556,27 +537,8 @@ function InteractiveChart({
                 dataKey={metric}
                 stroke="#2563eb"
                 strokeWidth={2}
-                dot={(props) => {
-                  const pointIndex = props.index;
-                  const isSelected = pointIndex === selectedIndex;
-                  return (
-                    <circle
-                      cx={props.cx}
-                      cy={props.cy}
-                      r={isSelected ? 6 : 3}
-                      fill={isSelected ? "#dc2626" : "#2563eb"}
-                      stroke="#ffffff"
-                      strokeWidth={isSelected ? 2 : 1}
-                      style={{ cursor: "pointer" }}
-                      onClick={() => {
-                        if (typeof pointIndex === "number") {
-                          onSelect(pointIndex);
-                        }
-                      }}
-                    />
-                  );
-                }}
-                activeDot={{ r: 7 }}
+                dot={false}
+                activeDot={{ r: 6, fill: "#2563eb", stroke: "#ffffff", strokeWidth: 1 }}
               />
             )}
             {selected && (
@@ -624,7 +586,7 @@ function TripsMapPanel({
 }) {
   const mapRef = useRef<google.maps.Map | null>(null);
   const { isLoaded: isMapLoaded, loadError } = useJsApiLoader({
-    id: "trip-map",
+    id: "equipment-records-map",
     googleMapsApiKey,
   });
 
@@ -698,6 +660,27 @@ function TripsMapPanel({
           }
         }}
       />
+
+      {visualPoints.length > 0 && (
+        <>
+          <MarkerF
+            position={{ lat: visualPoints[0].lat, lng: visualPoints[0].lng }}
+            icon={{
+              url: "/icons/startPoint.png",
+              scaledSize: new google.maps.Size(14, 14),
+              anchor: new google.maps.Point(7, 7),
+            }}
+          />
+          <MarkerF
+            position={{ lat: visualPoints[visualPoints.length - 1].lat, lng: visualPoints[visualPoints.length - 1].lng }}
+            icon={{
+              url: "/icons/llegada.png",
+              scaledSize: new google.maps.Size(28, 28),
+              anchor: new google.maps.Point(14, 14),
+            }}
+          />
+        </>
+      )}
 
       {selectedPoint && (
         <>
