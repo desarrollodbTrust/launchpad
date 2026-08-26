@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import AsignacionZonasTile from "./asignacion-zonas";
+import CreacionVehiculosTile from "./creacion-vehiculos";
 import DateTimeUsedHoursTile from "./date-time-used-hours";
 import DriverRecordsTile from "./driver-records";
 import EnganchesTrailersTile from "./enganches-trailers";
@@ -10,6 +11,7 @@ import EventLoggerTile from "./event-logger";
 import GeofenceAsignacionZonasTile from "./geofence-asignacion-zonas";
 import GeofenceEquipmentZonePermanenceTile from "./geofence-equipment-zone-permanence";
 import GeozonasTile from "./geozonas";
+import GruposTile from "./grupos";
 import LightMapTile from "./light-map";
 import MapGpsTile from "./map-gps";
 import RouteReplayTile from "./route-replay";
@@ -21,6 +23,7 @@ import TripsRecordsTile from "./trips-records";
 import UbicacionIndividualTile from "./ubicacion-individual";
 import UsedHoursReportTile from "./used-hours-report";
 import WorkshopCockpitTile from "./workshop-cockpit";
+import CrudGeneralTile from "./crud" 
 
 type TileModuleProps = {
   title: string;
@@ -29,6 +32,7 @@ type TileModuleProps = {
 
 export const tileComponentBySlug: Record<string, ComponentType<TileModuleProps>> = {
   "asignacion-zonas": AsignacionZonasTile,
+  "creacion-vehiculos": CreacionVehiculosTile,
   "date-time-used-hours": DateTimeUsedHoursTile,
   "driver-records": DriverRecordsTile,
   "enganches-trailers": EnganchesTrailersTile,
@@ -38,7 +42,9 @@ export const tileComponentBySlug: Record<string, ComponentType<TileModuleProps>>
   "event-logger": EventLoggerTile,
   "geofence-asignacion-zonas": GeofenceAsignacionZonasTile,
   "geofence-equipment-zone-permanence": GeofenceEquipmentZonePermanenceTile,
-  geozonas: GeozonasTile,
+  "geozonas": GeozonasTile,
+  "grupos": GruposTile,
+  "crud": CrudGeneralTile,
   "light-map": LightMapTile,
   "map-gps": MapGpsTile,
   "route-replay": RouteReplayTile,

@@ -13,6 +13,16 @@ export type LaunchpadSection = {
 
 export const launchpadSections: LaunchpadSection[] = [
   {
+    id: "administracion",
+    title: "Administracion",
+    tiles: [
+      { slug: "grupos", title: "Grupos de visualizacion", subtitle: "Asignaciones", visible: true },
+      { slug: "creacion-vehiculos", title: "Nuevo Vehiculo", subtitle: "ABM", visible: true },
+      { slug: "crud", title: "Crud General", subtitle: "ABM", visible: true },
+      
+    ],
+  },
+  {
     id: "aplicaciones",
     title: "Aplicaciones",
     tiles: [
