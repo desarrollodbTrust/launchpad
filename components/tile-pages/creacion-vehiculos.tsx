@@ -368,7 +368,7 @@ function isIgnorableCatalogText(value: unknown) {
   ].includes(normalized) || normalized.includes("sin asign");
 }
 
-function getCatalogValue(item: CatalogItem, keys: string[]) {
+function getCatalogValue(item: CatalogItem, keys: readonly string[]) {
   const record = item as Record<string, unknown>;
 
   for (const key of keys) {
@@ -391,7 +391,7 @@ function getCatalogValue(item: CatalogItem, keys: string[]) {
   return undefined;
 }
 
-function getCatalogId(item: CatalogItem, preferredKeys: string[] = []) {
+function getCatalogId(item: CatalogItem, preferredKeys: readonly string[] = []) {
   const record = item as Record<string, unknown>;
   const candidateKeys = [
     ...preferredKeys,
