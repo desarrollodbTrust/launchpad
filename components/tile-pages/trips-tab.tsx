@@ -285,6 +285,24 @@ function formatTimestamp(value: string) {
   return formatInUserTimeZone(date);
 }
 
+function formatChartTick(value: string) {
+  const date = parseUtcTimestamp(value);
+  if (!date) {
+    return value || "-";
+  }
+
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    timeZone: getDisplayTimeZone(),
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  return formatter.format(date).replace("/", "/");
+}
+
 function parseUtcTimestamp(value: string) {
   const raw = value.trim();
   if (!raw) {
@@ -464,7 +482,7 @@ function InteractiveChart({
       ? chartData[selectedIndex]
       : null;
 
-  const tickStep = Math.max(1, Math.floor(chartData.length / 8));
+  const tickStep = Math.max(1, Math.ceil(chartData.length / 8));
   const renderSpeedOverlay = metric === "speed" && showSpeedOverlay;
   const hasGpsSeries = chartData.some((item) => item.hasSpeedGps);
   const hasCanSeries = chartData.some((item) => item.hasSpeedCan);
@@ -496,9 +514,13 @@ function InteractiveChart({
             <CartesianGrid strokeDasharray="3 3" stroke="#dbeafe" />
             <XAxis
               dataKey="index"
-              tick={{ fontSize: 11 }}
+              tick={{ fontSize: 10 }}
               interval={tickStep - 1}
-              tickFormatter={(value: number) => formatTimestamp(chartData[value]?.timestamp ?? "")}
+              minTickGap={18}
+              height={34}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(value: number) => formatChartTick(chartData[value]?.timestamp ?? "")}
             />
             <YAxis tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
             <Tooltip
