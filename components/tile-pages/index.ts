@@ -24,6 +24,7 @@ import UbicacionIndividualTile from "./ubicacion-individual";
 import UsedHoursReportTile from "./used-hours-report";
 import WorkshopCockpitTile from "./workshop-cockpit";
 import CrudGeneralTile from "./crud" 
+import MantenimientoTile from "./mantenimiento";
 
 type TileModuleProps = {
   title: string;
@@ -56,4 +57,5 @@ export const tileComponentBySlug: Record<string, ComponentType<TileModuleProps>>
   "ubicacion-individual": UbicacionIndividualTile,
   "used-hours-report": UsedHoursReportTile,
   "workshop-cockpit": WorkshopCockpitTile,
+  "mantenimiento": MantenimientoTile,
 };

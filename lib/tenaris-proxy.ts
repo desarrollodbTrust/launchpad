@@ -65,7 +65,7 @@ export async function proxyTenaris(request: Request, targetUrl: string, label: s
 
 export async function proxyCatalogMutation(request: Request, targetUrl: string, method: "POST" | "PUT" | "DELETE", body?: string) {
   const { searchParams } = new URL(request.url);
-  const candidateIdKeys = ["makeId", "modelId", "submodelId", "countryId", "plantId", "areaId", "sectorId", "typeId", "id"];
+  const candidateIdKeys = ["makeId", "modelId", "submodelId", "countryId", "plantId", "areaId", "sectorId", "typeId", "maintenanceId", "maintenance_id", "id"];
   const idValue = candidateIdKeys.map((key) => searchParams.get(key)).find((value) => value && value.trim() !== "");
 
   let upstreamUrl = targetUrl;

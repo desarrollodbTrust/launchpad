@@ -21,6 +21,13 @@ export const launchpadSections: LaunchpadSection[] = [
       { slug: "crud", title: "Crud General", subtitle: "ABM", visible: true },
       
     ],
+  }, {
+    id: "mantenimiento",
+    title: "Mantenimiento",
+    tiles: [
+      { slug: "mantenimiento", title: "Mantenimiento", subtitle: "ABM", visible: true },
+      
+    ],
   },
   {
     id: "aplicaciones",
