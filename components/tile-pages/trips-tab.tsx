@@ -822,7 +822,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
       setLoading(true);
       setError(null);
       try {
-        const payload = await fetchTripPage(vin, page, 100);
+        const payload = await fetchTripPage(vin, 0, 5000);
         if (!mounted) {
           return;
         }
@@ -932,10 +932,10 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
   const showCharts = mode === "charts" || mode === "combined";
 
   return (
-    <div className="space-y-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       {showList && (
-        <div className="space-y-3">
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 text-left text-xs uppercase tracking-[0.06em] text-slate-600">
                 <tr>
@@ -994,24 +994,8 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
             </table>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-            <span className="text-slate-600">Pagina {page + 1} de {totalPages} · {totalElements} viajes</span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((current) => Math.max(0, current - 1))}
-                disabled={page === 0 || loading}
-                className="rounded border border-slate-300 bg-white px-3 py-1 disabled:opacity-50"
-              >
-                Anterior
-              </button>
-              <button
-                onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
-                disabled={page >= totalPages - 1 || loading}
-                className="rounded border border-slate-300 bg-white px-3 py-1 disabled:opacity-50"
-              >
-                Siguiente
-              </button>
-            </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            {totalElements} viajes disponibles
           </div>
         </div>
       )}

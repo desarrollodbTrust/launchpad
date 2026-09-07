@@ -172,6 +172,32 @@ type NormalizedTelemetry = {
   timestamp: string;
 };
 
+type MaintenanceStatusRow = {
+  vin?: string | null;
+  maintenanceId?: string | null;
+  description?: string | null;
+  typeName?: string | null;
+  status?: string | null;
+  pending?: boolean | null;
+  dueSoon?: boolean | null;
+  overdue?: boolean | null;
+  usesKm?: boolean | null;
+  usesHours?: boolean | null;
+  usesDate?: boolean | null;
+  frequencyKm?: number | string | null;
+  frequencyHours?: number | string | null;
+  frequencyDays?: number | string | null;
+  preAvisoKm?: number | string | null;
+  preAvisoHours?: number | string | null;
+  preAvisoDias?: number | string | null;
+  remainingKm?: number | string | null;
+  remainingHours?: number | string | null;
+  remainingDays?: number | string | null;
+  nextDueKm?: number | string | null;
+  nextDueHours?: number | string | null;
+  nextDueDate?: string | null;
+};
+
 const DEFAULT_IMAGE_URL = "/next.svg";
 const TELEMETRY_POLL_INTERVAL_MS = 15_000;
 const FALLBACK_TIME_ZONE = "America/Argentina/Buenos_Aires";
@@ -230,6 +256,19 @@ function toNumber(value: unknown): number | undefined {
     }
   }
   return undefined;
+}
+
+function toPrimitiveValue(value: unknown): string | number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -571,6 +610,48 @@ async function fetchTelemetryByVin(vin: string) {
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
+async function fetchMaintenanceStatusByVin(vin: string): Promise<MaintenanceStatusRow[]> {
+  const response = await fetch(`/api/maintenance-status?vin=${encodeURIComponent(vin)}`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Error ${response.status} en /api/maintenance-status`);
+  }
+
+  const payload = (await response.json()) as {
+    data?: unknown[];
+  };
+
+  return Array.isArray(payload.data)
+    ? payload.data.filter((item): item is Record<string, unknown> => isRecord(item)).map((item) => ({
+        vin: toText(item.vin ?? item.vehicleVin ?? null),
+        maintenanceId: toText(item.maintenanceId ?? item.id ?? null),
+        description: toText(item.description ?? item.name ?? "Sin descripción"),
+        typeName: toText(item.typeName ?? item.maintenanceType ?? null, "Sin tipo"),
+        status: toText(item.status ?? "OK"),
+        pending: item.pending === true || item.pending === "true",
+        dueSoon: item.dueSoon === true || item.dueSoon === "true",
+        overdue: item.overdue === true || item.overdue === "true",
+        usesKm: item.usesKm === true || item.usesKm === "true",
+        usesHours: item.usesHours === true || item.usesHours === "true",
+        usesDate: item.usesDate === true || item.usesDate === "true",
+        frequencyKm: toPrimitiveValue(item.frequencyKm ?? item.kmFrequency ?? null),
+        frequencyHours: toPrimitiveValue(item.frequencyHours ?? item.hoursFrequency ?? null),
+        frequencyDays: toPrimitiveValue(item.frequencyDays ?? item.daysFrequency ?? null),
+        preAvisoKm: toPrimitiveValue(item.preAvisoKm ?? item.warningKm ?? null),
+        preAvisoHours: toPrimitiveValue(item.preAvisoHours ?? item.warningHours ?? null),
+        preAvisoDias: toPrimitiveValue(item.preAvisoDias ?? item.warningDays ?? null),
+        remainingKm: toPrimitiveValue(item.remainingKm ?? item.remaining_km ?? null),
+        remainingHours: toPrimitiveValue(item.remainingHours ?? item.remaining_hours ?? null),
+        remainingDays: toPrimitiveValue(item.remainingDays ?? item.remaining_days ?? null),
+        nextDueKm: toPrimitiveValue(item.nextDueKm ?? item.next_due_km ?? null),
+        nextDueHours: toPrimitiveValue(item.nextDueHours ?? item.next_due_hours ?? null),
+        nextDueDate: toText(item.nextDueDate ?? item.next_due_date ?? "", "") || null,
+      }))
+    : [];
+}
+
 type ReplayPoint = {
   timestamp: string;
   lat: number;
@@ -698,6 +779,7 @@ export default function TileModule(props: TileModuleProps) {
   const [telemetryFetching, setTelemetryFetching] = useState(false);
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
   const [telemetryLastRequestByVin, setTelemetryLastRequestByVin] = useState<Record<string, string>>({});
+  const [maintenanceStatusByVin, setMaintenanceStatusByVin] = useState<Record<string, MaintenanceStatusRow[]>>({});
   const [selectedVin, setSelectedVin] = useState<string>("");
   const [runtimeMapsApiKey, setRuntimeMapsApiKey] = useState("");
   const [mapFrom, setMapFrom] = useState(() => {
@@ -891,6 +973,35 @@ export default function TileModule(props: TileModuleProps) {
       return;
     }
 
+    let mounted = true;
+
+    const loadMaintenanceStatus = async () => {
+      try {
+        const rows = await fetchMaintenanceStatusByVin(selectedVin);
+        if (!mounted) {
+          return;
+        }
+        setMaintenanceStatusByVin((current) => ({ ...current, [selectedVin]: rows }));
+      } catch {
+        if (!mounted) {
+          return;
+        }
+        setMaintenanceStatusByVin((current) => ({ ...current, [selectedVin]: [] }));
+      }
+    };
+
+    void loadMaintenanceStatus();
+
+    return () => {
+      mounted = false;
+    };
+  }, [selectedVin]);
+
+  useEffect(() => {
+    if (!selectedVin) {
+      return;
+    }
+
     if (activeTab !== "telemetry" && activeTab !== "map") {
       return;
     }
@@ -964,6 +1075,7 @@ export default function TileModule(props: TileModuleProps) {
     [vehicles, selectedVin]
   );
 
+  const selectedMaintenanceRows = useMemo(() => maintenanceStatusByVin[selectedVin] ?? [], [maintenanceStatusByVin, selectedVin]);
   const selectedTelemetry = useMemo(() => telemetryByVin[selectedVin] ?? null, [telemetryByVin, selectedVin]);
   const trendHistory = useMemo(() => trendHistoryByVin[selectedVin] ?? [], [selectedVin, trendHistoryByVin]);
   const telemetryLoading = telemetryFetching && !selectedTelemetry;
@@ -1253,30 +1365,81 @@ export default function TileModule(props: TileModuleProps) {
             <div className="min-h-0 flex-1 overflow-visible pr-1">
             {activeTab === "info" && (
               <div className="grid h-full grid-cols-1 gap-3 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="mb-3 flex h-44 items-center justify-center overflow-hidden rounded bg-white xl:h-56">
-                    {selectedVehicle?.imageUrl ? (
-                      <div
-                        role="img"
-                        aria-label={selectedVehicle.label}
-                        className="h-full w-full rounded bg-contain bg-center bg-no-repeat"
-                        style={{ backgroundImage: `url(${selectedVehicle.imageUrl})` }}
-                      />
-                    ) : (
-                      <p className="text-sm text-slate-400">Sin imagen</p>
-                    )}
+                <div className="flex flex-col gap-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="mb-3 flex h-44 items-center justify-center overflow-hidden rounded bg-white xl:h-56">
+                      {selectedVehicle?.imageUrl ? (
+                        <div
+                          role="img"
+                          aria-label={selectedVehicle.label}
+                          className="h-full w-full rounded bg-contain bg-center bg-no-repeat"
+                          style={{ backgroundImage: `url(${selectedVehicle.imageUrl})` }}
+                        />
+                      ) : (
+                        <p className="text-sm text-slate-400">Sin imagen</p>
+                      )}
+                    </div>
+
+                    <h3 className="mb-2 text-base font-semibold text-slate-800">Vehicle</h3>
+                    <div className="grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
+                      <p><span className="font-medium text-slate-700">Make:</span> {selectedVehicle?.make ?? "-"}</p>
+                      <p><span className="font-medium text-slate-700">Model:</span> {selectedVehicle?.model ?? "-"}</p>
+                      <p><span className="font-medium text-slate-700">Submodel:</span> {selectedVehicle?.submodel ?? "-"}</p>
+                      <p><span className="font-medium text-slate-700">Year:</span> {selectedVehicle?.year ?? "-"}</p>
+                      <p><span className="font-medium text-slate-700">Lic Plate:</span> {selectedVehicle?.licPlate ?? "-"}</p>
+                      <p><span className="font-medium text-slate-700">VIN:</span> {selectedVehicle?.vin ?? "-"}</p>
+                      <p><span className="font-medium text-slate-700">Device Id:</span> {selectedVehicle?.deviceId ?? "-"}</p>
+                      <p className="sm:col-span-2"><span className="font-medium text-slate-700">Vehicle type:</span> {selectedVehicle?.vehicleType ?? "-"}</p>
+                    </div>
                   </div>
 
-                  <h3 className="mb-2 text-base font-semibold text-slate-800">Vehicle</h3>
-                  <div className="grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
-                    <p><span className="font-medium text-slate-700">Make:</span> {selectedVehicle?.make ?? "-"}</p>
-                    <p><span className="font-medium text-slate-700">Model:</span> {selectedVehicle?.model ?? "-"}</p>
-                    <p><span className="font-medium text-slate-700">Submodel:</span> {selectedVehicle?.submodel ?? "-"}</p>
-                    <p><span className="font-medium text-slate-700">Year:</span> {selectedVehicle?.year ?? "-"}</p>
-                    <p><span className="font-medium text-slate-700">Lic Plate:</span> {selectedVehicle?.licPlate ?? "-"}</p>
-                    <p><span className="font-medium text-slate-700">VIN:</span> {selectedVehicle?.vin ?? "-"}</p>
-                    <p><span className="font-medium text-slate-700">Device Id:</span> {selectedVehicle?.deviceId ?? "-"}</p>
-                    <p className="sm:col-span-2"><span className="font-medium text-slate-700">Vehicle type:</span> {selectedVehicle?.vehicleType ?? "-"}</p>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <h3 className="mb-2 text-base font-semibold text-slate-800">Próximo service</h3>
+
+                    {selectedMaintenanceRows.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-4 text-center text-sm text-slate-500">
+                        Sin mantenimientos asignados.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {selectedMaintenanceRows.map((row, index) => {
+                          const items: string[] = [];
+
+                          if (row.usesKm && row.remainingKm !== null && row.remainingKm !== undefined && row.remainingKm !== "") {
+                            items.push(`Falta ${Number(row.remainingKm).toLocaleString("es-AR")} km`);
+                          }
+                          if (row.usesHours && row.remainingHours !== null && row.remainingHours !== undefined && row.remainingHours !== "") {
+                            items.push(`Falta ${Number(row.remainingHours).toLocaleString("es-AR")} hs`);
+                          }
+                          if (row.usesDate && row.remainingDays !== null && row.remainingDays !== undefined && row.remainingDays !== "") {
+                            items.push(`Falta ${Number(row.remainingDays).toLocaleString("es-AR")} días`);
+                          }
+
+                          return (
+                            <div key={`${row.maintenanceId ?? row.description ?? index}`} className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="mb-1 flex items-center justify-between gap-3">
+                                <p className="text-sm font-semibold text-slate-800">{row.description || row.typeName || "Mantenimiento"}</p>
+                                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-600">{row.status ?? "OK"}</span>
+                              </div>
+
+                              {items.length > 0 ? (
+                                <ul className="space-y-1 text-xs text-slate-700">
+                                  {items.map((item) => (
+                                    <li key={item}>• {item}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="text-xs text-slate-500">Sin detalle disponible.</p>
+                              )}
+
+                              {row.nextDueDate ? (
+                                <p className="mt-2 text-[11px] text-slate-600">Próximo vencimiento: {formatTimestamp(row.nextDueDate)}</p>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
 
