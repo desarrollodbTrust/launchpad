@@ -166,6 +166,22 @@ async function fetchTripPage(vin: string, page: number, size: number) {
   };
 }
 
+async function fetchAllTripPages(vin: string) {
+  const firstPage = await fetchTripPage(vin, 0, 100);
+  const allData = [...firstPage.data];
+
+  for (let page = 1; page < firstPage.totalPages; page += 1) {
+    const nextPage = await fetchTripPage(vin, page, 100);
+    allData.push(...nextPage.data);
+  }
+
+  return {
+    data: allData,
+    totalPages: firstPage.totalPages,
+    totalElements: firstPage.totalElements,
+  };
+}
+
 async function fetchObdPoints(vin: string, startTime: string, endTime: string) {
   const params = new URLSearchParams({
     vin,
@@ -822,7 +838,7 @@ export default function TripsTab({ vin, active }: TripsTabProps) {
       setLoading(true);
       setError(null);
       try {
-        const payload = await fetchTripPage(vin, 0, 5000);
+        const payload = await fetchAllTripPages(vin);
         if (!mounted) {
           return;
         }
