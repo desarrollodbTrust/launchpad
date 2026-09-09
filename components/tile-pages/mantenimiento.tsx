@@ -8,21 +8,9 @@ type TileModuleProps = {
   subtitle?: string;
 };
 
-type MaintenanceType = {
-  maintenanceTypeId?: number | string | null;
-  id?: number | string | null;
-  name?: string | null;
-  usesKm?: boolean | number | string | null;
-  usesHours?: boolean | number | string | null;
-  usesDate?: boolean | number | string | null;
-  active?: boolean | number | string | null;
-  [key: string]: unknown;
-};
-
 type MaintenanceRecord = {
   maintenanceId?: number | string | null;
   description?: string | null;
-  maintenanceTypeId?: number | string | null;
   tipo?: number | string | null;
   frequency?: number | string | null;
   preAviso?: number | string | null;
@@ -33,33 +21,18 @@ type MaintenanceRecord = {
 type MaintenanceAssignment = {
   vin?: string | null;
   maintenanceId?: number | string | null;
-  description?: string | null;
-  typeName?: string | null;
-  status?: string | null;
   lastKm?: number | string | null;
   lastDate?: string | null;
   lastHours?: string | null;
-  currentKm?: number | string | null;
-  currentHours?: number | string | null;
-  nextDueKm?: number | string | null;
-  nextDueHours?: number | string | null;
-  nextDueDate?: string | null;
-  remainingKm?: number | string | null;
-  remainingHours?: number | string | null;
-  remainingDays?: number | string | null;
   [key: string]: unknown;
 };
 
 const emptyMaintenanceForm = {
   description: "",
   tipo: "1",
+  frequency: "10000",
+  preAviso: "1000",
   relationType: "1",
-  frequencyKm: "10000",
-  preAvisoKm: "1000",
-  frequencyHours: "10000",
-  preAvisoHours: "1000",
-  frequencyMonths: "12",
-  preAvisoDays: "30",
 };
 
 const emptyAssignmentForm = {
@@ -106,7 +79,6 @@ function normalizeArrayPayload(payload: unknown): unknown[] {
 
 export default function TileModule({ title, subtitle }: TileModuleProps) {
   const [maintenances, setMaintenances] = useState<MaintenanceRecord[]>([]);
-  const [maintenanceTypes, setMaintenanceTypes] = useState<MaintenanceType[]>([]);
   const [assignments, setAssignments] = useState<MaintenanceAssignment[]>([]);
   const [vehicles, setVehicles] = useState<Array<{ vin?: string; licPlate?: string; [key: string]: unknown }>>([]);
   const [vehicleSearch, setVehicleSearch] = useState("");
@@ -118,19 +90,6 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
   const [showVehicleSuggestions, setShowVehicleSuggestions] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-
-  const loadMaintenanceTypes = async () => {
-    try {
-      const response = await fetch("/api/maintenance-type", { cache: "no-store" });
-      const payload = await response.json();
-      const items = normalizeArrayPayload(payload) as MaintenanceType[];
-      setMaintenanceTypes(items);
-      return items;
-    } catch (error) {
-      console.error("Error cargando tipos de mantenimiento", error);
-      return [];
-    }
-  };
 
   const loadMaintenances = async () => {
     try {
@@ -153,7 +112,7 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
         params.set("vin", vin.trim());
       }
 
-      const response = await fetch(`/api/maintenance-status${params.toString() ? `?${params.toString()}` : ""}`, { cache: "no-store" });
+      const response = await fetch(`/api/mant-equipment${params.toString() ? `?${params.toString()}` : ""}`, { cache: "no-store" });
       const payload = await response.json();
       const items = normalizeArrayPayload(payload) as MaintenanceAssignment[];
       setAssignments(items);
@@ -175,7 +134,6 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
     };
 
     const loadInitialData = async () => {
-      await loadMaintenanceTypes();
       await loadMaintenances();
       await loadAssignments();
       await loadVehicleOptions();
@@ -183,17 +141,6 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
 
     void loadInitialData();
   }, []);
-
-  const selectedMaintenanceType = maintenanceTypes.find((type) => {
-    const id = type.maintenanceTypeId ?? type.id;
-    return String(id ?? "") === String(maintenanceForm.tipo ?? "");
-  });
-
-  const usesKm = Boolean(selectedMaintenanceType?.usesKm || selectedMaintenanceType?.usesKm === 1 || selectedMaintenanceType?.usesKm === "true");
-  const usesHours = Boolean(selectedMaintenanceType?.usesHours || selectedMaintenanceType?.usesHours === 1 || selectedMaintenanceType?.usesHours === "true");
-  const usesDate = Boolean(selectedMaintenanceType?.usesDate || selectedMaintenanceType?.usesDate === 1 || selectedMaintenanceType?.usesDate === "true");
-  const isCombinedReminderType = (usesKm && usesDate) || (usesHours && usesDate);
-  const primaryMetricLabel = usesKm ? "KM" : usesHours ? "horas" : usesDate ? "meses" : "valor";
 
   const handleMaintenanceChange = (field: keyof typeof emptyMaintenanceForm, value: string) => {
     setMaintenanceForm((current) => ({ ...current, [field]: value }));
@@ -208,45 +155,13 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
     setMessage(null);
 
     try {
-      const selectedTypeId = Number(maintenanceForm.tipo || 1);
-      const frequencyKmValue = Number(maintenanceForm.frequencyKm || 0);
-      const preAvisoKmValue = Number(maintenanceForm.preAvisoKm || 0);
-      const frequencyHoursValue = Number(maintenanceForm.frequencyHours || 0);
-      const preAvisoHoursValue = Number(maintenanceForm.preAvisoHours || 0);
-      const frequencyMonthsValue = Number(maintenanceForm.frequencyMonths || 0);
-      const preAvisoDaysValue = Number(maintenanceForm.preAvisoDays || 0);
-
-      const payload: Record<string, unknown> = {
+      const payload = {
         description: maintenanceForm.description.trim(),
-        maintenanceTypeId: selectedTypeId,
-        typeId: selectedTypeId,
-        tipo: selectedTypeId,
+        tipo: Number(maintenanceForm.tipo || 1),
+        frequency: Number(maintenanceForm.frequency || 0),
+        preAviso: Number(maintenanceForm.preAviso || 0),
         relationType: Number(maintenanceForm.relationType || 1),
-        usesKm,
-        usesHours,
-        usesDate,
       };
-
-      if (usesKm) {
-        payload.frequencyKm = frequencyKmValue;
-        payload.preAvisoKm = preAvisoKmValue;
-        payload.frequency = frequencyKmValue;
-        payload.preAviso = preAvisoKmValue;
-      }
-
-      if (usesHours) {
-        payload.frequencyHours = frequencyHoursValue;
-        payload.preAvisoHours = preAvisoHoursValue;
-        payload.frequency = frequencyHoursValue;
-        payload.preAviso = preAvisoHoursValue;
-      }
-
-      if (usesDate) {
-        payload.frequencyMonths = frequencyMonthsValue;
-        payload.preAvisoDays = preAvisoDaysValue;
-        payload.frequency = frequencyMonthsValue;
-        payload.preAviso = preAvisoDaysValue;
-      }
 
       const response = await fetch("/api/mantenimiento", {
         method: "POST",
@@ -280,46 +195,14 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
     setMessage(null);
 
     try {
-      const selectedTypeId = Number(maintenanceForm.tipo || 1);
-      const frequencyKmValue = Number(maintenanceForm.frequencyKm || 0);
-      const preAvisoKmValue = Number(maintenanceForm.preAvisoKm || 0);
-      const frequencyHoursValue = Number(maintenanceForm.frequencyHours || 0);
-      const preAvisoHoursValue = Number(maintenanceForm.preAvisoHours || 0);
-      const frequencyMonthsValue = Number(maintenanceForm.frequencyMonths || 0);
-      const preAvisoDaysValue = Number(maintenanceForm.preAvisoDays || 0);
-
-      const payload: Record<string, unknown> = {
+      const payload = {
         maintenanceId: Number(editingMaintenanceId),
         description: maintenanceForm.description.trim(),
-        maintenanceTypeId: selectedTypeId,
-        typeId: selectedTypeId,
-        tipo: selectedTypeId,
+        tipo: Number(maintenanceForm.tipo || 1),
+        frequency: Number(maintenanceForm.frequency || 0),
+        preAviso: Number(maintenanceForm.preAviso || 0),
         relationType: Number(maintenanceForm.relationType || 1),
-        usesKm,
-        usesHours,
-        usesDate,
       };
-
-      if (usesKm) {
-        payload.frequencyKm = frequencyKmValue;
-        payload.preAvisoKm = preAvisoKmValue;
-        payload.frequency = frequencyKmValue;
-        payload.preAviso = preAvisoKmValue;
-      }
-
-      if (usesHours) {
-        payload.frequencyHours = frequencyHoursValue;
-        payload.preAvisoHours = preAvisoHoursValue;
-        payload.frequency = frequencyHoursValue;
-        payload.preAviso = preAvisoHoursValue;
-      }
-
-      if (usesDate) {
-        payload.frequencyMonths = frequencyMonthsValue;
-        payload.preAvisoDays = preAvisoDaysValue;
-        payload.frequency = frequencyMonthsValue;
-        payload.preAviso = preAvisoDaysValue;
-      }
 
       const response = await fetch(`/api/mantenimiento?maintenanceId=${encodeURIComponent(String(editingMaintenanceId))}`, {
         method: "PUT",
@@ -356,22 +239,13 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
         throw new Error("Debes completar VIN y mantenimiento para asignar.");
       }
 
-      const payload: Record<string, unknown> = {
+      const payload = {
         vin,
         maintenanceId: Number(maintenanceId),
+        lastKm: assignmentForm.lastKm ? Number(assignmentForm.lastKm) : undefined,
+        lastDate: normalizeInstantForApi(assignmentForm.lastDate),
+        lastHours: assignmentForm.lastHours || "",
       };
-
-      if (assignmentForm.lastKm && assignmentForm.lastKm.trim() !== "") {
-        payload.lastKm = Number(assignmentForm.lastKm);
-      }
-
-      if (assignmentForm.lastDate && assignmentForm.lastDate.trim() !== "") {
-        payload.lastDate = normalizeInstantForApi(assignmentForm.lastDate);
-      }
-
-      if (assignmentForm.lastHours && assignmentForm.lastHours.trim() !== "") {
-        payload.lastHours = assignmentForm.lastHours;
-      }
 
       const response = await fetch("/api/mant-equipment", {
         method: "POST",
@@ -397,26 +271,13 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
   };
 
   const handleEditMaintenance = (item: MaintenanceRecord) => {
-    const itemRecord = item as Record<string, unknown>;
-    const selectedTypeId = String(itemRecord.maintenanceTypeId ?? itemRecord.typeId ?? item.tipo ?? "1");
-    const frequencyKmValue = itemRecord.frequencyKm ?? itemRecord.frequency ?? "10000";
-    const preAvisoKmValue = itemRecord.preAvisoKm ?? itemRecord.preAviso ?? "1000";
-    const frequencyHoursValue = itemRecord.frequencyHours ?? itemRecord.frequency ?? "10000";
-    const preAvisoHoursValue = itemRecord.preAvisoHours ?? itemRecord.preAviso ?? "1000";
-    const frequencyMonthsValue = itemRecord.frequencyMonths ?? itemRecord.frequency ?? "12";
-    const preAvisoDaysValue = itemRecord.preAvisoDays ?? itemRecord.preAviso ?? "30";
-
     setEditingMaintenanceId(item.maintenanceId ?? null);
     setMaintenanceForm({
       description: item.description ?? "",
-      tipo: selectedTypeId,
+      tipo: String(item.tipo ?? "1"),
+      frequency: String(item.frequency ?? "10000"),
+      preAviso: String(item.preAviso ?? "1000"),
       relationType: String(item.relationType ?? "1"),
-      frequencyKm: String(frequencyKmValue),
-      preAvisoKm: String(preAvisoKmValue),
-      frequencyHours: String(frequencyHoursValue),
-      preAvisoHours: String(preAvisoHoursValue),
-      frequencyMonths: String(frequencyMonthsValue),
-      preAvisoDays: String(preAvisoDaysValue),
     });
     setMessage("Editando mantenimiento existente.");
   };
@@ -473,10 +334,6 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
 
   const maintenanceDescriptionById = new Map(
     maintenances.map((item) => [String(item.maintenanceId ?? ""), item.description ?? "Sin descripción"])
-  );
-
-  const maintenanceTypeNameById = new Map(
-    maintenanceTypes.map((type) => [String(type.maintenanceTypeId ?? type.id ?? ""), type.name ?? "Sin tipo"])
   );
 
   const vehicleLookupByVin = new Map(
@@ -578,27 +435,37 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-sm font-medium text-[color:var(--foreground)]">
-                Tipo de mantenimiento
-                <select
+                Tipo
+                <input
+                  type="number"
                   value={maintenanceForm.tipo}
                   onChange={(event) => handleMaintenanceChange("tipo", event.target.value)}
                   className="mt-1 w-full rounded-md border border-[color:var(--tile-border)] bg-white px-3 py-2 text-sm text-[color:var(--foreground)] outline-none ring-0"
-                >
-                  <option value="">Seleccione una opción</option>
-                  {maintenanceTypes.map((type) => {
-                    const id = String(type.maintenanceTypeId ?? type.id ?? "");
-                    const label = type.name || id;
-                    return (
-                      <option key={id || `maintenance-type-${label}`} value={id}>
-                        {label}
-                      </option>
-                    );
-                  })}
-                </select>
+                />
               </label>
 
               <label className="block text-sm font-medium text-[color:var(--foreground)]">
-                Relación
+                Frecuencia
+                <input
+                  type="number"
+                  value={maintenanceForm.frequency}
+                  onChange={(event) => handleMaintenanceChange("frequency", event.target.value)}
+                  className="mt-1 w-full rounded-md border border-[color:var(--tile-border)] bg-white px-3 py-2 text-sm text-[color:var(--foreground)] outline-none ring-0"
+                />
+              </label>
+
+              <label className="block text-sm font-medium text-[color:var(--foreground)]">
+                Pre aviso
+                <input
+                  type="number"
+                  value={maintenanceForm.preAviso}
+                  onChange={(event) => handleMaintenanceChange("preAviso", event.target.value)}
+                  className="mt-1 w-full rounded-md border border-[color:var(--tile-border)] bg-white px-3 py-2 text-sm text-[color:var(--foreground)] outline-none ring-0"
+                />
+              </label>
+
+              <label className="block text-sm font-medium text-[color:var(--foreground)]">
+                Relation type
                 <input
                   type="number"
                   value={maintenanceForm.relationType}
@@ -607,82 +474,6 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
                 />
               </label>
             </div>
-
-            {selectedMaintenanceType ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {usesKm ? (
-                  <label className="block text-sm font-medium text-[color:var(--foreground)]">
-                    Frecuencia KM
-                    <input
-                      type="number"
-                      value={maintenanceForm.frequencyKm}
-                      onChange={(event) => handleMaintenanceChange("frequencyKm", event.target.value)}
-                      className="mt-1 w-full rounded-md border border-[color:var(--tile-border)] bg-white px-3 py-2 text-sm text-[color:var(--foreground)] outline-none ring-0"
-                    />
-                  </label>
-                ) : null}
-
-                {usesHours ? (
-                  <label className="block text-sm font-medium text-[color:var(--foreground)]">
-                    Frecuencia horas
-                    <input
-                      type="number"
-                      value={maintenanceForm.frequencyHours}
-                      onChange={(event) => handleMaintenanceChange("frequencyHours", event.target.value)}
-                      className="mt-1 w-full rounded-md border border-[color:var(--tile-border)] bg-white px-3 py-2 text-sm text-[color:var(--foreground)] outline-none ring-0"
-                    />
-                  </label>
-                ) : null}
-
-                {usesDate ? (
-                  <label className="block text-sm font-medium text-[color:var(--foreground)]">
-                    Frecuencia meses
-                    <input
-                      type="number"
-                      value={maintenanceForm.frequencyMonths}
-                      onChange={(event) => handleMaintenanceChange("frequencyMonths", event.target.value)}
-                      className="mt-1 w-full rounded-md border border-[color:var(--tile-border)] bg-white px-3 py-2 text-sm text-[color:var(--foreground)] outline-none ring-0"
-                    />
-                  </label>
-                ) : null}
-
-                {usesKm ? (
-                  <label className="block text-sm font-medium text-[color:var(--foreground)]">
-                    Pre aviso KM
-                    <input
-                      type="number"
-                      value={maintenanceForm.preAvisoKm}
-                      onChange={(event) => handleMaintenanceChange("preAvisoKm", event.target.value)}
-                      className="mt-1 w-full rounded-md border border-[color:var(--tile-border)] bg-white px-3 py-2 text-sm text-[color:var(--foreground)] outline-none ring-0"
-                    />
-                  </label>
-                ) : null}
-
-                {usesHours ? (
-                  <label className="block text-sm font-medium text-[color:var(--foreground)]">
-                    Pre aviso horas
-                    <input
-                      type="number"
-                      value={maintenanceForm.preAvisoHours}
-                      onChange={(event) => handleMaintenanceChange("preAvisoHours", event.target.value)}
-                      className="mt-1 w-full rounded-md border border-[color:var(--tile-border)] bg-white px-3 py-2 text-sm text-[color:var(--foreground)] outline-none ring-0"
-                    />
-                  </label>
-                ) : null}
-
-                {usesDate ? (
-                  <label className="block text-sm font-medium text-[color:var(--foreground)]">
-                    Pre aviso días
-                    <input
-                      type="number"
-                      value={maintenanceForm.preAvisoDays}
-                      onChange={(event) => handleMaintenanceChange("preAvisoDays", event.target.value)}
-                      className="mt-1 w-full rounded-md border border-[color:var(--tile-border)] bg-white px-3 py-2 text-sm text-[color:var(--foreground)] outline-none ring-0"
-                    />
-                  </label>
-                ) : null}
-              </div>
-            ) : null}
 
             <div className="flex flex-wrap gap-2 pt-2">
               <button
@@ -715,76 +506,54 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
           <table className="w-full divide-y divide-[color:var(--tile-border)] text-left text-sm">
             <thead>
               <tr className="text-[color:var(--tile-muted)]">
+                <th className="px-3 py-2 font-medium">ID</th>
                 <th className="px-3 py-2 font-medium">Descripción</th>
                 <th className="px-3 py-2 font-medium">Tipo</th>
-                <th className="px-3 py-2 font-medium">Frec. KM</th>
-                <th className="px-3 py-2 font-medium">Pre aviso KM</th>
-                <th className="px-3 py-2 font-medium">Frec. horas</th>
-                <th className="px-3 py-2 font-medium">Pre aviso horas</th>
-                <th className="px-3 py-2 font-medium">Frec. meses</th>
-                <th className="px-3 py-2 font-medium">Pre aviso días</th>
+                <th className="px-3 py-2 font-medium">Frecuencia</th>
+                <th className="px-3 py-2 font-medium">Pre aviso</th>
+                <th className="px-3 py-2 font-medium">Relation</th>
                 <th className="px-3 py-2 font-medium text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[color:var(--tile-border)]">
               {maintenances.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-6 text-center text-[color:var(--tile-muted)]">
+                  <td colSpan={7} className="px-3 py-6 text-center text-[color:var(--tile-muted)]">
                     No hay mantenimientos cargados.
                   </td>
                 </tr>
               ) : (
-                maintenances.map((item) => {
-                  const itemRecord = item as Record<string, unknown>;
-                  const itemTypeId = String(item.tipo ?? item.maintenanceTypeId ?? itemRecord.typeId ?? "");
-                  const typeName = String(
-                    maintenanceTypeNameById.get(itemTypeId) ?? itemRecord.typeName ?? itemRecord.name ?? "Sin tipo"
-                  );
-                  const frequencyKmValue = String(itemRecord.frequencyKm ?? "-");
-                  const preAvisoKmValue = String(itemRecord.preAvisoKm ?? "-");
-                  const frequencyHoursValue = String(itemRecord.frequencyHours ?? "-");
-                  const preAvisoHoursValue = String(itemRecord.preAvisoHours ?? "-");
-                  const frequencyMonthsValue = String(itemRecord.frequencyMonths ?? "-");
-                  const preAvisoDaysValue = String(itemRecord.preAvisoDays ?? "-");
-
-                  return (
-                    <tr key={String(item.maintenanceId ?? JSON.stringify(item))} className="align-top">
-                      <td className="px-3 py-2 text-[color:var(--foreground)]">{item.description ?? "-"}</td>
-                      <td className="px-3 py-2 text-[color:var(--foreground)]">{typeName}</td>
-                      <td className="px-3 py-2 text-[color:var(--foreground)]">{frequencyKmValue}</td>
-                      <td className="px-3 py-2 text-[color:var(--foreground)]">{preAvisoKmValue}</td>
-                      <td className="px-3 py-2 text-[color:var(--foreground)]">{frequencyHoursValue}</td>
-                      <td className="px-3 py-2 text-[color:var(--foreground)]">{preAvisoHoursValue}</td>
-                      <td className="px-3 py-2 text-[color:var(--foreground)]">{frequencyMonthsValue}</td>
-                      <td className="px-3 py-2 text-[color:var(--foreground)]">{preAvisoDaysValue}</td>
-                      <td className="px-3 py-2 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            aria-label="Editar mantenimiento"
-                            title="Editar"
-                            onClick={() => {
-                              setShowCreateMaintenanceForm(true);
-                              handleEditMaintenance(item);
-                            }}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[color:var(--tile-border)] bg-white text-[color:var(--foreground)] hover:bg-slate-50"
-                          >
-                            ✏️
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="Eliminar mantenimiento"
-                            title="Eliminar"
-                            onClick={() => void handleDeleteMaintenance(item.maintenanceId)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
+                maintenances.map((item) => (
+                  <tr key={String(item.maintenanceId ?? JSON.stringify(item))} className="align-top">
+                    <td className="px-3 py-2 text-[color:var(--foreground)]">{item.maintenanceId ?? "-"}</td>
+                    <td className="px-3 py-2 text-[color:var(--foreground)]">{item.description ?? "-"}</td>
+                    <td className="px-3 py-2 text-[color:var(--foreground)]">{item.tipo ?? "-"}</td>
+                    <td className="px-3 py-2 text-[color:var(--foreground)]">{item.frequency ?? "-"}</td>
+                    <td className="px-3 py-2 text-[color:var(--foreground)]">{item.preAviso ?? "-"}</td>
+                    <td className="px-3 py-2 text-[color:var(--foreground)]">{item.relationType ?? "-"}</td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCreateMaintenanceForm(true);
+                            handleEditMaintenance(item);
+                          }}
+                          className="rounded-md border border-[color:var(--tile-border)] bg-white px-2 py-1 text-xs font-medium text-[color:var(--foreground)] hover:bg-slate-50"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteMaintenance(item.maintenanceId)}
+                          className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -911,22 +680,19 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
           <table className="w-full min-w-[900px] divide-y divide-[color:var(--tile-border)] text-left text-xs sm:text-sm">
             <thead className="sticky top-0 bg-[color:var(--tile)]">
               <tr className="text-[color:var(--tile-muted)]">
+                <th className="px-2 py-2 font-medium">Equipo</th>
                 <th className="px-2 py-2 font-medium">Placa</th>
                 <th className="px-2 py-2 font-medium">Mantenimiento</th>
-                <th className="px-2 py-2 font-medium">Próx. KM</th>
-                <th className="px-2 py-2 font-medium">Próx. horas</th>
-                <th className="px-2 py-2 font-medium">Próx. fecha</th>
-                <th className="px-2 py-2 font-medium">Restante KM</th>
-                <th className="px-2 py-2 font-medium">Restante horas</th>
-                <th className="px-2 py-2 font-medium">Restante días</th>
-                <th className="px-2 py-2 font-medium">Estado</th>
+                <th className="px-2 py-2 font-medium">Último KM</th>
+                <th className="px-2 py-2 font-medium">Última fecha</th>
+                <th className="px-2 py-2 font-medium">Últimas horas</th>
                 <th className="px-2 py-2 font-medium text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[color:var(--tile-border)]">
               {assignments.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-3 py-6 text-center text-[color:var(--tile-muted)]">
+                  <td colSpan={7} className="px-3 py-6 text-center text-[color:var(--tile-muted)]">
                     No hay asignaciones cargadas.
                   </td>
                 </tr>
@@ -934,12 +700,11 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
                 assignments.map((item, index) => {
                   const vehicle = item.vin ? vehicleLookupByVin.get(String(item.vin)) : undefined;
                   const licPlate = vehicle?.licPlate ? String(vehicle.licPlate) : "-";
-                  const description = item.description ?? (item.maintenanceId ? maintenanceDescriptionById.get(String(item.maintenanceId)) ?? "Sin descripción" : "-");
-                  const nextDueDate = item.nextDueDate ? new Date(item.nextDueDate).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" }) : "-";
-                  const status = String(item.status ?? "OK").toUpperCase();
+                  const description = item.maintenanceId ? maintenanceDescriptionById.get(String(item.maintenanceId)) ?? "Sin descripción" : "-";
 
                   return (
                     <tr key={`${item.vin ?? "vin"}-${item.maintenanceId ?? index}`}>
+                      <td className="px-2 py-2 text-[color:var(--foreground)]">{item.vin ?? "-"}</td>
                       <td className="px-2 py-2 text-[color:var(--foreground)]">{licPlate}</td>
                       <td className="px-2 py-2 text-[color:var(--foreground)]">
                         {item.maintenanceId ?? "-"}
@@ -947,13 +712,9 @@ export default function TileModule({ title, subtitle }: TileModuleProps) {
                           <span className="ml-1 text-[color:var(--tile-muted)]">({description})</span>
                         ) : null}
                       </td>
-                      <td className="px-2 py-2 text-[color:var(--foreground)]">{item.nextDueKm ?? "-"}</td>
-                      <td className="px-2 py-2 text-[color:var(--foreground)]">{item.nextDueHours ?? "-"}</td>
-                      <td className="px-2 py-2 text-[color:var(--foreground)]">{nextDueDate}</td>
-                      <td className="px-2 py-2 text-[color:var(--foreground)]">{item.remainingKm ?? "-"}</td>
-                      <td className="px-2 py-2 text-[color:var(--foreground)]">{item.remainingHours ?? "-"}</td>
-                      <td className="px-2 py-2 text-[color:var(--foreground)]">{item.remainingDays ?? "-"}</td>
-                      <td className="px-2 py-2 text-[color:var(--foreground)]">{status}</td>
+                      <td className="px-2 py-2 text-[color:var(--foreground)]">{item.lastKm ?? "-"}</td>
+                      <td className="px-2 py-2 text-[color:var(--foreground)]">{item.lastDate ?? "-"}</td>
+                      <td className="px-2 py-2 text-[color:var(--foreground)]">{item.lastHours ?? "-"}</td>
                       <td className="px-2 py-2 text-right">
                         <button
                           type="button"
